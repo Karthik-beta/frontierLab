@@ -1,0 +1,15 @@
+Frontier — a Democracy-style strategy game about founding a frontier AI lab.
+Copyright 2026 g8r-b8 (https://github.com/g8r-b8)
+Original project: https://github.com/g8r-b8/frontierLab
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+If you fork, copy or redistribute this work, you must keep this NOTICE file (or its
+contents) and credit the original project above, and state what you changed.
+
+Third-party content:
+- Quotes, headlines and facts in js/data/archive.js, js/data/achievements.js and
+  tools/research/*.json are attributed to their original authors and publishers, with
+  sources linked. They remain the property of their respective owners and are included
+  for commentary and education. The Apache License does not grant rights to them.
+- PeerJS (MIT License) is loaded at runtime from a CDN for online multiplayer.
+- The game's labs, chips, providers and candidates are fictional.

@@ -71,3 +71,9 @@ play are fictional.
 - `test/`: `npm test`.
 
 Roadmap: [TODO.md](TODO.md). Docs: [docs/](docs/). Press kit: [docs/PRESS_KIT.md](docs/PRESS_KIT.md).
+
+## License
+
+[Apache License 2.0](LICENSE). Fork it, remix it, ship it — but keep the [NOTICE](NOTICE) file and credit the
+original project ([g8r-b8/frontierLab](https://github.com/g8r-b8/frontierLab)), and say what you changed.
+Real quotes and facts in the Archive belong to their original authors and are cited with sources.
