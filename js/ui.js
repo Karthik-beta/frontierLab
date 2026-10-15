@@ -276,6 +276,7 @@
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${Math.floor(S.bandwidth)} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
+      <button class="btn" data-action="rivals">Rivals</button>
       <button class="btn" data-action="marketingMenu">Marketing${S.mkt && S.mkt.booked.length ? ` <b class="pos">${S.mkt.booked.length}</b>` : ''}</button>
       <button class="btn" data-action="hiring">People${S.people && S.people.feed.length ? ` <b>${S.people.feed.length}</b>` : ''}</button>
       <button class="btn" data-action="compute">Compute${S.hw && S.hw.offers.length ? ` <b class="pos">${S.hw.offers.length} deal${S.hw.offers.length > 1 ? 's' : ''}</b>` : ''}</button>
@@ -312,11 +313,11 @@
     }).join('');
     const appr = E.approval(S);
     const conf = E.investorConfidence(S);
-    const racers = [{ name: 'You', est: S.cap, sd: 0, color: '#7dd3fc' }].concat(S.rivals.map((r) => { const e = FL.Fog.rivalEstimate(S, r); return { name: r.name, est: e.est, sd: e.sd, color: r.color, player: r.player, source: e.source, age: e.age }; }))
+    const racers = [{ name: 'You', est: S.cap, sd: 0, color: '#7dd3fc' }].concat(S.rivals.map((r) => { const e = FL.Fog.rivalEstimate(S, r); return { id: r.id, name: r.name, est: e.est, sd: e.sd, color: r.color, player: r.player, source: e.source, age: e.age }; }))
       .sort((a, b) => b.est - a.est);
     const race = racers.map((r) => {
       const lo = Math.max(0, r.est - 1.6 * r.sd), hi = Math.min(105, r.est + 1.6 * r.sd);
-      return `<div class="race-row" title="${r.sd ? `Estimate from ${esc(r.source)}${r.age > 0.2 ? `, ${Math.round(r.age * 13)} weeks ago` : ''}` : 'Your own lab'}"><div class="lbl"><span>${esc(r.name)}${r.player ? ` <span class="muted">· ${esc(r.player)}</span>` : ''}</span>
+      return `<div class="race-row" ${r.sd ? `data-action="rivals" data-arg="${esc(r.id || '')}" style="cursor:pointer"` : ''} title="${r.sd ? `Estimate from ${esc(r.source)}${r.age > 0.2 ? `, ${Math.round(r.age * 13)} weeks ago` : ''}` : 'Your own lab'}"><div class="lbl"><span>${esc(r.name)}${r.player ? ` <span class="muted">· ${esc(r.player)}</span>` : ''}</span>
         <b>${r.sd ? `~${Math.round(r.est)} <small class="muted">±${Math.round(1.6 * r.sd)}</small>` : Math.floor(r.est)}</b></div>
         <div class="rbar">${r.sd ? `<i class="range" style="left:${lo}%;width:${hi - lo}%;background:${r.color}"></i>` : ''}<span style="width:${Math.min(100, r.est)}%;background:${r.color};${r.sd ? 'opacity:.55' : ''}"></span></div></div>`;
     }).join('');
@@ -686,13 +687,14 @@
     if (!box || !S) return;
     const sp = MP.active() ? (MP.lobby.settings.speed || 1) : speed;
     const cards = S.inbox.map((item) => {
-      const d = FL.DILEMMAS.find((x) => x.id === item.id);
-      if (!d) return '';
+      const d0 = FL.DILEMMAS.find((x) => x.id === item.id);
+      if (!d0) return '';
+      const d = { ...d0, ...E.dilemmaView(S, item) };
       const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
       const total = item.deadline - item.arrived, left = Math.max(0, item.deadline - S.week - loopAcc / WEEK_MS);
       const secs = sp ? Math.ceil((left * WEEK_MS) / sp / 1000) : null;
       return `<div class="dcard ${pit ? 'pit' : ''}">
-        <div class="dhead"><span>${pit ? `Pitfall · ${pit.horizon}-term` : d.launch ? `${esc(S.lastModel || 'New model')} is ready` : 'Decision'}</span>
+        <div class="dhead"><span>${pit ? `Pitfall · ${pit.horizon}-term` : d.launch ? `${esc(S.lastModel || 'New model')} is ready` : d.rival ? 'From a rival' : 'Decision'}</span>
           <span class="${left < 1.5 ? 'neg' : ''}">${secs == null ? 'paused' : `${Math.ceil(left)} wk · ~${secs}s`}</span></div>
         <div class="dbar"><span style="width:${(left / total) * 100}%"></span></div>
         <b>${esc(d.title)}</b><p>${esc(d.text)}</p>
@@ -707,7 +709,7 @@
   UI.decide = function (uid, i) {
     const item = S.inbox.find((x) => x.uid === uid);
     if (!item) return { ok: false, reason: 'That decision is gone.' };
-    const d = FL.DILEMMAS.find((x) => x.id === item.id);
+    const d = { ...FL.DILEMMAS.find((x) => x.id === item.id), ...E.dilemmaView(S, item) };
     if (!(i >= 0 && i < d.options.length)) return { ok: false, reason: `Choose 1-${d.options.length}.` };
     const res = E.resolveDilemma(S, i, uid);
     const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
@@ -819,6 +821,15 @@
     },
     archive: (tab) => showArchive(tab || 'all'),
     growth: () => showGrowth(),
+    rivals: (id) => showRivals(id),
+    rivalAct: (arg) => {
+      const [aid, rid] = String(arg).split('|');
+      const r = FL.Rivals.act(S, aid, rid);
+      if (!r.ok) { showRivals(rid, r.reason); return r; }
+      afterAction(r);
+      showRivals(rid, null, r.text);
+      return r;
+    },
     claimOpp: (uid) => {
       const r = FL.Events.claim(S, uid);
       if (!r.ok) { FX.toast(esc(r.reason), 'bad', 2500); renderOpps(); return r; }
@@ -996,6 +1007,41 @@
         <li><span>Brand (seeds new regions)</span><span class="m">${pct(S.values.brand)}</span></li>
         <li><span>Price vs free tier</span><span class="m">${S.policies.pricing ? 'priced ' + pct(S.policies.pricing.level) : 'default'} / ${S.policies.freeTier ? 'free tier ' + pct(S.policies.freeTier.level) : 'no free tier'}</span></li>
       </ul></div></div>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Close</button></div>`);
+    $('modalCard').classList.add('wide');
+  }
+
+  function showRivals(focus, err, result) {
+    const list = S.rivals.slice();
+    const cur = list.find((r) => r.id === focus) || list[0];
+    if (!cur) { openModal('<h1>Rivals</h1><p class="note">No rivals left. Lonely at the top.</p><div class="btn-row"><button class="btn primary" data-action="closeModal">Close</button></div>'); return; }
+    const tabs = list.map((r) => `<button class="btn ${r === cur ? 'on' : ''}" data-action="rivals" data-arg="${esc(r.id)}"><i class="dot" style="background:${r.color}"></i>${esc(r.name)}</button>`).join('');
+    const rec = FL.Rivals.rec(S, cur);
+    const e = FL.Fog.rivalEstimate(S, cur);
+    const relPct = Math.round(rec.rel * 100);
+    const moves = (kind) => FL.INTERACTIONS.filter((a) => a.kind === kind).map((a) => {
+      const b = FL.Rivals.blocker(S, a.id, cur.id);
+      const cost = [a.bw ? `${a.bw} bandwidth` : '', a.cash ? money(a.cash * Math.pow(1.06, S.turn - 1)) : '', a.id === 'acquire' && !cur.remote ? `~${money(FL.Rivals.acquirePrice(S, cur))}` : ''].filter(Boolean).join(' · ');
+      return `<div class="card" style="cursor:default"><h4>${esc(a.name)}${a.risky ? ' <span class="neg">(risky)</span>' : ''}${a.anonymous ? ' <span class="muted">(anonymous)</span>' : ''}</h4>
+        <p>${esc(a.desc)}</p><div class="meta">${esc(cost || 'free')}${kind === 'coop' ? ' · needs their consent' : ''}</div>
+        <div class="meta" title="${esc(a.history)}">Precedent: ${esc(a.history)}</div>
+        <div class="btn-row"><button class="btn ${kind === 'hostile' ? 'danger' : 'primary'}" data-action="rivalAct" data-arg="${a.id}|${esc(cur.id)}" ${b ? 'disabled' : ''}>${kind === 'hostile' ? 'Do it' : 'Propose'}</button>${b ? `<span class="muted">${esc(b)}</span>` : ''}</div></div>`;
+    }).join('');
+    const history = rec.moves.slice(-5).reverse().map((m) => `<li><span>${esc(m.text)}</span><span class="m muted">${E.quarterLabel(Math.floor(m.week / 13) + 1)}</span></li>`).join('');
+    openModal(`<h1>Rivals</h1>
+      <div class="tabs">${tabs}</div>
+      ${err ? `<div class="callout bad">${esc(err)}</div>` : ''}${result ? `<div class="callout good">${esc(result)}</div>` : ''}
+      <div class="rep-grid"><div>
+        <h3>${esc(cur.name)}${cur.player ? ` · ${esc(cur.player)}` : ''}</h3>
+        <div class="row"><span>Estimated capability</span><span class="m">~${Math.round(e.est)} ±${Math.round(1.6 * e.sd)} <span class="muted">(${esc(e.source)})</span></span></div>
+        <div class="row"><span>Relationship</span><span class="m" style="color:${happyColor(rec.rel)}">${relPct > 0 ? '+' : ''}${relPct}</span></div>
+        <div class="cbar" style="margin:6px 0 10px"><span style="background:${happyColor(rec.rel)};${rec.rel >= 0 ? 'left:50%' : 'right:50%'};width:${Math.abs(rec.rel) * 50}%"></span></div>
+        <div class="row"><span>Read on them</span><span class="m">${esc(FL.Rivals.personaHint(S, cur))}</span></div>
+        ${rec.grudge > 0.5 ? '<p class="note neg">They are holding a grudge. Expect retaliation.</p>' : ''}
+        <h3>Your history with them</h3><ul class="rep-list">${history || '<li class="muted">No moves yet.</li>'}</ul>
+      </div><div><p class="note">Every move costs bandwidth and goodwill. Hostile moves slow them and may help you — or backfire. Cooperative ones need them to say yes, and they remember how you have treated them.</p></div></div>
+      <h3>Hostile moves</h3><div class="cards">${moves('hostile')}</div>
+      <h3>Cooperative moves</h3><div class="cards">${moves('coop')}</div>
       <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Close</button></div>`);
     $('modalCard').classList.add('wide');
   }
@@ -1212,6 +1258,8 @@
   MP.on('ended', (end) => handleEnding(end));
   // World events are rolled by the host and hit every lab at the table (each lab rolls its own subset coin).
   MP.on('world', (m) => { if (S && !S.ended) FL.Events.applyWorldEvent(S, m.id, m.salt, S.qr); });
+  // Moves other players make toward you (impacts, proposals, replies).
+  MP.on('interact', (m) => { if (S && !S.ended) { FL.Rivals.receiveRemote(S, m); handleEvents(); renderInbox(); } });
   MP.on('error', (e) => FX.toast(esc(e), 'bad', 5000));
   MP.on('hostLeft', () => FX.toast('The host left the lobby.', 'bad', 6000));
 
@@ -1278,6 +1326,8 @@
         case 'oppMissed': feed(`<b>Missed</b> ${esc(ev.name)}`); break;
         case 'buff': feed(`<b>Effect</b> ${esc(ev.name)} for ${ev.weeks} weeks`); break;
         case 'users': { A.play('milestone'); FX.flash('#4ade80'); const r = $('boardArea').getBoundingClientRect(); FX.burst(r.left + r.width / 2, r.top + r.height / 2, ['#4ade80', '#7dd3fc', '#fbbf24'], 70); T(`<span class="tk">Growth milestone</span><b>${esc(ev.text)}</b>`, 'legendary', 7000); break; }
+        case 'interaction': A.play('click'); T(`<span class="tk">Your move</span>${esc(ev.text)}`, ev.hostile ? 'info' : 'good', 6000); break;
+        case 'attacked': A.play(ev.good ? 'chime' : 'warn'); T(`<span class="tk">Rival move</span>${esc(ev.text)}`, ev.good ? 'good' : 'bad', 6000); if (!ev.good) FX.shake($('boardWrap'), 3, 220); break;
         case 'offerDeclined': T(`<span class="tk">Offer declined</span>${esc(ev.text)}`, 'bad', 4000); break;
       }
     }

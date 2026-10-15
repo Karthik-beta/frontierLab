@@ -57,7 +57,7 @@
 
   function inboxData(s) {
     return s.inbox.map((item) => {
-      const d = FL.DILEMMAS.find((x) => x.id === item.id);
+      const d = { ...FL.DILEMMAS.find((x) => x.id === item.id), ...E.dilemmaView(s, item) };
       return { id: item.uid, title: d.title, text: d.text, pitfall: !!d.pitfall, weeksLeft: Math.max(0, item.deadline - s.week), defaultOption: E.defaultOption(d) + 1,
         options: d.options.map((o, i) => ({ n: i + 1, label: o.label, desc: o.desc })) };
     });
@@ -173,6 +173,9 @@
   fleet | deals | accept <dealId> | sell <clusterId>
   campaigns | book <id> | unbook <id>   Marketing campaigns (results at quarter end)
   archive                     Your collection
+  rivals                      Rival labs: estimates, relationship, your read on them, moves available
+  act <move> <rival>          Make a move (poachTeam, priceWar, antitrust, espionage, smear, lockout, ipSuit,
+                              safetyPact, pausePact, sellCapacity, license, coalition, acquire)
   growth                      Users by region (Plague-style map data)
   opps | claim <#id>          Golden opportunities on the board (they vanish fast)
   buffs | world               Active effects; recent world events
@@ -329,6 +332,19 @@
       case 'world': {
         const rows = (s.journal || []).filter((j) => j.type === 'world').slice(-10);
         return { ok: true, data: rows, text: rows.map((j) => `[${j.when}] ${j.text}`).join('\n') || 'No world events yet.' };
+      }
+      case 'rivals': {
+        const rows = s.rivals.map((r) => { const e = FL.Fog.rivalEstimate(s, r); const rec = FL.Rivals.rec(s, r);
+          return { id: r.id, name: r.name, estimate: Math.round(e.est), plusMinus: Math.round(1.6 * e.sd), relationship: +rec.rel.toFixed(2), read: FL.Rivals.personaHint(s, r), grudge: rec.grudge > 0.5,
+            available: FL.INTERACTIONS.filter((a) => !FL.Rivals.blocker(s, a.id, r.id)).map((a) => a.id) }; });
+        return { ok: true, data: { rivals: rows, moves: FL.INTERACTIONS.map((a) => ({ id: a.id, kind: a.kind, name: a.name, bandwidth: a.bw, desc: a.desc })) },
+          text: rows.map((r) => `${r.id.padEnd(12)} ${r.name} · ~${r.estimate}±${r.plusMinus} · relationship ${r.relationship >= 0 ? '+' : ''}${Math.round(r.relationship * 100)} · ${r.read}${r.grudge ? ' · holding a grudge' : ''}\n   can: ${r.available.join(', ') || 'nothing right now'}`).join('\n') +
+            '\nMoves: ' + FL.INTERACTIONS.map((a) => `${a.id} (${a.kind})`).join(', ') + '\nUse: frontier act <move> <rival>' };
+      }
+      case 'act': {
+        const r = FL.Rivals.act(s, args[0], args.slice(1).join(' '));
+        U.refresh(r);
+        return r.ok ? { ok: true, text: r.text } : fail(r.reason);
       }
       case 'archive': { const m = U.meta(); return { ok: true, data: m, text: `${m.artifacts.length}/${FL.ARCHIVE.length} artifacts, ${m.achievements.length}/${FL.ACHIEVEMENTS.length} achievements.` }; }
       case 'say': case 'advise': U.advisor(args.join(' ')); return { ok: true, text: 'Shown in the browser.' };
