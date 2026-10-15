@@ -109,6 +109,13 @@
     }
   };
 
+  /** Non-edge inputs from subsystems (hardware fleet, team). Each returns {nodeId: delta}. */
+  E.extraInputs = [];
+  E.registerInput = function (id, label, fn) {
+    E.extraInputs = E.extraInputs.filter((x) => x.id !== id);
+    E.extraInputs.push({ id, label, fn });
+  };
+
   /** Live contribution of one edge (what it is pushing into its target right now). */
   E.contribution = (state, e) => state.contrib[e.idx] || 0;
 
@@ -141,6 +148,9 @@
     FL.STAKEHOLDERS.forEach((s) => (state.happiness[s.id] = s.base));
     FL.SITUATIONS.forEach((s) => { state.pressure[s.id] = 0; state.active[s.id] = 0; });
     E.allEffects().forEach((e) => (state.contrib[e.idx] = 0));
+    state.ownership = 100;
+    if (FL.Hardware) FL.Hardware.init(state, arch);
+    if (FL.Hiring) FL.Hiring.init(state, arch);
 
     // Warm start: settle the network so turn 1 isn't a cold transient.
     state.finance = E.computeFinances(state);
@@ -195,6 +205,13 @@
       state.contrib[e.idx] = c + (target - c) / lag;
       sums[e.to] = (sums[e.to] || 0) + state.contrib[e.idx];
     }
+    state.extra = {};
+    for (const inp of E.extraInputs) {
+      let m = {};
+      try { m = inp.fn(state) || {}; } catch (err) { m = {}; }
+      state.extra[inp.id] = m;
+      for (const [k, v] of Object.entries(m)) if (Number.isFinite(v)) sums[k] = (sums[k] || 0) + v;
+    }
     for (const s of FL.STATS) {
       state.values[s.id] = clamp(s.base + (state.baseMods[s.id] || 0) + (sums[s.id] || 0) + E.shockTotal(state, s.id), 0, 1);
     }
@@ -248,6 +265,8 @@
     FL.CATEGORIES.forEach((c) => { if (catTotals[c.id]) items.push({ label: c.name, amount: catTotals[c.id], color: c.color }); });
     items.push({ label: 'Inference serving', amount: v.adoption * 160 * E.costScale(state, 'compute'), color: '#94a3b8' });
     items.push({ label: 'G&A overhead', amount: 30 * E.costScale(state, 'payroll'), color: '#64748b' });
+    if (FL.Hardware) items.push(...FL.Hardware.costItems(state));
+    if (FL.Hiring) items.push(...FL.Hiring.costItems(state));
     for (const s of FL.SITUATIONS) {
       if (state.active[s.id] && s.special && s.special.cost) items.push({ label: s.name, amount: s.special.cost * (1 + 0.03 * state.turn), color: '#ef4444' });
     }
@@ -267,7 +286,7 @@
     const revAnnual = state.finance.revenue * 4;
     const mult = Math.max(5, 12 + 35 * v.hype + 25 * (v.lead - 0.5));
     const capPremium = Math.pow(state.cap, 1.3) * 500 * (0.6 + v.hype);
-    let val = revAnnual * mult + capPremium;
+    let val = revAnnual * mult + capPremium + (FL.Hardware ? 0.5 * FL.Hardware.bookValue(state) : 0);
     const np = state.policies.nonprofit;
     if (np) val *= 1 - E.node('nonprofit').def.special.valuationHaircut * (0.2 + 0.8 * np.level);
     val *= 1 + 0.3 * E.investorConfidence(state);
@@ -293,6 +312,7 @@
     }
     state.cash += raised;
     state.bridgesUsed = 0;
+    state.ownership = (state.ownership || 100) * (val / (val + raised));
     const round = { turn: state.turn, name, raised, valuation: val, ok, text };
     state.rounds.push(round);
     return round;
@@ -544,6 +564,8 @@
     state.cash += state.finance.net;
     state.revHistory.push(state.finance.revenue);
     report.finance = { ...state.finance };
+    if (FL.Hardware) FL.Hardware.update(state, report);
+    if (FL.Hiring) FL.Hiring.update(state, report);
 
     const capRes = E.advanceCapability(state);
     report.capGain = capRes.gain;

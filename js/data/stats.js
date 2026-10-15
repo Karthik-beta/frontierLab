@@ -4,7 +4,7 @@
   'use strict';
 
   FL.STATS = [
-    { id: 'compute', name: 'Compute Capacity', base: 0.10, good: true,
+    { id: 'compute', name: 'Compute Capacity', base: 0.0, good: true,
       desc: 'GPUs you can actually train and serve on. The single biggest driver of research velocity, and the single biggest line on your burn.' },
     { id: 'talent', name: 'Talent Density', base: 0.25, good: true,
       desc: 'How many of the world\'s best researchers work for you. Researchers follow compute, pay, mission and winning.' },

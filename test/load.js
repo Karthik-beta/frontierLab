@@ -4,7 +4,7 @@ const path = require('path');
 const vm = require('vm');
 
 const FILES = ['data/stats', 'data/policies', 'data/stakeholders', 'data/situations', 'data/dilemmas', 'data/archetypes',
-  'data/pitfalls', 'data/archive', 'data/progression', 'data/difficulty', 'engine', 'systems'];
+  'data/pitfalls', 'data/archive', 'data/progression', 'data/difficulty', 'data/hardware', 'engine', 'systems', 'hardware'];
 
 module.exports = function load() {
   const ctx = vm.createContext({ console, Math, JSON });

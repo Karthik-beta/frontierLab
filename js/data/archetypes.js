@@ -7,11 +7,13 @@
       blurb: 'A billion dollars of pledges, a nonprofit charter and a promise to benefit all of humanity. Can the mission survive the compute bill?',
       cash: 1200, bandwidth: 20, cap: 4,
       policies: { nonprofit: 1.0, publish: 0.8, alignment: 0.3, comp: 0.4 },
+      fleet: [{ gen: 'halcyon', pods: 6 }],
       baseMods: { trust: 0.10, openness: 0.10 } },
     { id: 'defectors', name: 'The Safety Defectors', difficulty: 'Normal',
       blurb: 'You left a frontier lab because they were moving too fast. Now you have to move fast enough to matter.',
       cash: 1000, bandwidth: 18, cap: 6,
       policies: { alignment: 0.6, interp: 0.4, redteam: 0.5, rsp: 0.4, comp: 0.5 },
+      fleet: [{ gen: 'halcyon', pods: 8 }],
       baseMods: { talent: 0.08, safety: 0.08, morale: 0.05 } },
     { id: 'spinout', name: 'The Big Tech Spinout', difficulty: 'Easy',
       blurb: 'Deep pockets, a cloud parent and a lot of meetings. Speed is your problem, not money.',
@@ -22,6 +24,7 @@
       blurb: 'A dozen brilliant engineers, a Discord server and very little money. Out-ship the giants.',
       cash: 500, bandwidth: 22, cap: 3,
       policies: { openWeights: 0.7, publish: 0.6, comp: 0.2, crunch: 0.4 },
+      fleet: [{ gen: 'halcyon', pods: 4 }],
       baseMods: { morale: 0.10, openness: 0.10 } },
   ];
 
