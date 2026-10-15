@@ -1210,6 +1210,8 @@
   MP.on('start', () => { startGame(MP.makeGame()); FX.toast(`The race is on: ${MP.lobby.players.length} labs, in real time.`, 'good'); });
   MP.on('chat', (c) => { if (!lobbyOpen()) FX.toast(`<span class="tk">${esc(c.company || '')}</span><b>${esc(c.from)}:</b> ${esc(c.text)}`, 'info', 5000); else showLobby(); });
   MP.on('ended', (end) => handleEnding(end));
+  // World events are rolled by the host and hit every lab at the table (each lab rolls its own subset coin).
+  MP.on('world', (m) => { if (S && !S.ended) FL.Events.applyWorldEvent(S, m.id, m.salt, S.qr); });
   MP.on('error', (e) => FX.toast(esc(e), 'bad', 5000));
   MP.on('hostLeft', () => FX.toast('The host left the lobby.', 'bad', 6000));
 
