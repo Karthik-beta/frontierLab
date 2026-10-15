@@ -113,5 +113,11 @@
     { id: 'ach-allpit', name: 'Lessons Learned', trigger: 'pitfalls:5', desc: 'Hit five different historical pitfalls in one run.' },
     { id: 'ach-speed', name: 'Feel the AGI', trigger: 'speedrun', desc: 'Reach AGI before 2033.' },
     { id: 'ach-archive25', name: 'Archivist', trigger: 'archive:25', desc: 'Collect 25 archive artifacts across all runs.' },
+    { id: 'ach-users100', name: 'Fastest-Growing App in History', trigger: 'users:100', desc: 'Reach 100 million users.' },
+    { id: 'ach-users1000', name: 'A Billion Users', trigger: 'users:1000', desc: 'Reach a billion users.' },
+    { id: 'ach-golden', name: 'Golden Touch', trigger: 'opp:10', desc: 'Claim ten golden opportunities in one run.' },
+    { id: 'ach-wrath', name: 'Too Good to Be True', trigger: 'opp:wrath:lose', desc: 'Take a shady opportunity and get burned.' },
+    { id: 'ach-crash', name: 'Bear Hug', trigger: 'world:marketCrash', desc: 'Live through a tech crash.' },
+    { id: 'ach-spared', name: 'Not My Problem', trigger: 'world:gridFailure:spared', desc: 'Watch a grid failure hit everyone but you.' },
   ];
 })(globalThis.FL = globalThis.FL || {});

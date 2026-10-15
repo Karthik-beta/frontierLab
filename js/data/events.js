@@ -1,5 +1,101 @@
-/* data/events.js — TODO: fill. */
+/* data/events.js — world events and golden opportunities.
+ *
+ * WORLD_EVENTS hit labs by scope:
+ *   'all'    everyone (you and every rival lab),
+ *   'cond'   labs that match a condition (you: cond(state); AI rivals: by chance `rivalP`),
+ *   'random' each lab independently with probability p (in multiplayer, each player rolls).
+ * For you: fx shocks [target, amount, quarters], cash ($M, scaled), podsLost (share of owned pods),
+ * buff {name, weeks, fx, mult}, region {id, ban (0..1 suppression), weeks} or {id, boost, weeks}, candidate (legend).
+ * For AI rivals: rival {cap (instant change), pace (multiplier), weeks}. */
 (function (FL) {
   'use strict';
-  // TODO
+  const P = (s, id) => !!s.policies[id];
+
+  FL.WORLD_EVENTS = [
+    { id: 'exportControls', title: 'New chip export controls', good: false, scope: 'cond', weight: 1, minTurn: 4,
+      cond: (s) => !P(s, 'datacenters'), rivalP: 0.5,
+      text: 'Governments tighten controls on advanced accelerators. Labs renting GPUs on the open market feel it first.',
+      fx: [['compute', -0.1, 0.6]], rival: { pace: 0.85, weeks: 8 } },
+    { id: 'gridFailure', title: 'Grid failure in a datacenter corridor', good: false, scope: 'cond', weight: 1, minTurn: 6,
+      cond: (s) => P(s, 'datacenters'), rivalP: 0.3,
+      text: 'A heat wave knocks out a regional grid for days. Clusters cook; some hardware does not come back.',
+      podsLost: 0.08, rival: { cap: -1, weeks: 0 } },
+    { id: 'marketCrash', title: 'Tech stocks crash', good: false, scope: 'all', weight: 0.8, minTurn: 6,
+      text: 'A rate scare and an ugly earnings season wipe a trillion dollars off tech. Private valuations follow.',
+      fx: [['investors', -0.3, 0.6], ['hype', -0.08, 0.5]], buff: { name: 'Bear market', weeks: 10, mult: { valuation: 0.75 } } },
+    { id: 'aiBoom', title: 'AI mania', good: true, scope: 'all', weight: 0.9, minTurn: 3,
+      text: 'Every ad, every earnings call, every dinner party: AI. Money is cheap and attention is free.',
+      fx: [['hype', 0.1, 0.5], ['investors', 0.15, 0.5]], buff: { name: 'AI mania', weeks: 8, mult: { valuation: 1.2 } } },
+    { id: 'osBreakthrough', title: 'Open-source breakthrough', good: true, scope: 'cond', weight: 0.8, minTurn: 5,
+      cond: (s) => P(s, 'openWeights') || P(s, 'publish'), rivalP: 0.4,
+      text: 'A community model matches last year\'s frontier. Labs that share research get a flood of contributors.',
+      fx: [['openSource', 0.3, 0.6], ['talent', 0.04, 0.6]], rival: { cap: 1.2, weeks: 0 } },
+    { id: 'visaShift', title: 'Talent visa shake-up', good: false, scope: 'random', p: 0.5, weight: 0.8, minTurn: 4,
+      text: 'A sudden change to work-visa rules strands researchers mid-move. Some labs lose people overnight.',
+      fx: [['talent', -0.06, 0.6], ['morale', -0.05, 0.4]], rival: { pace: 0.9, weeks: 8 } },
+    { id: 'solarStorm', title: 'A cluster goes dark', good: false, scope: 'random', p: 0.25, weight: 0.5, minTurn: 8,
+      text: 'A transformer fire and a botched failover take one lab\'s biggest cluster offline for weeks.',
+      fx: [['compute', -0.15, 0.3]], rival: { cap: -2, weeks: 0 } },
+    { id: 'sandbox', title: 'Regulatory sandbox', good: true, scope: 'cond', weight: 0.6, minTurn: 6,
+      cond: (s) => s.values.regHeat < 0.3, rivalP: 0.3,
+      text: 'Regulators open a fast-track sandbox for labs with clean records.',
+      fx: [['regulators', 0.3, 0.6], ['regHeat', -0.05, 0.6]], rival: { pace: 1.08, weeks: 8 } },
+    { id: 'celebrity', title: 'A celebrity can\'t stop posting about one lab', good: true, scope: 'random', p: 0.3, weight: 0.7, minTurn: 2,
+      text: 'A pop star posts a ten-part thread about how one AI changed her life. Downloads follow.',
+      fx: [['hype', 0.12, 0.3], ['brand', 0.04, 0.6]] },
+    { id: 'deepfakeWave', title: 'A wave of deepfake scams', good: false, scope: 'all', weight: 0.7, minTurn: 6,
+      text: 'Voice-clone scams hit grandparents everywhere. Public mood on AI sours across the board.',
+      fx: [['trust', -0.06, 0.6], ['regHeat', 0.04, 0.6]] },
+    { id: 'euAct', title: 'European enforcement push', good: false, scope: 'cond', weight: 0.6, minTurn: 8,
+      cond: (s) => !P(s, 'audits'), rivalP: 0.5,
+      text: 'European regulators open cases against AI labs without independent audits. Growth in Europe stalls.',
+      region: { id: 'eu', ban: 0.5, weeks: 12 }, cash: -150, rival: { pace: 0.95, weeks: 6 } },
+    { id: 'chinaOpening', title: 'A door opens in China', good: true, scope: 'random', p: 0.35, weight: 0.3, minTurn: 10,
+      text: 'A local partnership gets a foreign model approved for limited release in China.',
+      region: { id: 'china', boost: 5, weeks: 26 } },
+    { id: 'indiaBoom', title: 'South Asia adopts AI at breakneck speed', good: true, scope: 'all', weight: 0.6, minTurn: 5,
+      text: 'Cheap data plans and a few viral use cases send AI adoption in South Asia vertical.',
+      region: { id: 'india', boost: 1.4, weeks: 26 } },
+    { id: 'powerPrices', title: 'Power prices spike', good: false, scope: 'cond', weight: 0.7, minTurn: 6,
+      cond: (s) => P(s, 'datacenters'), rivalP: 0.4,
+      text: 'A cold snap and a gas shortage double wholesale power prices for weeks.',
+      buff: { name: 'Power price spike', weeks: 8, mult: { opex: 1.6 } }, rival: { pace: 0.93, weeks: 8 } },
+    { id: 'rateCut', title: 'Central banks cut rates', good: true, scope: 'all', weight: 0.6, minTurn: 4,
+      text: 'Cheap money is back. Growth stocks rally and late-stage investors get generous.',
+      fx: [['investors', 0.2, 0.6]], buff: { name: 'Cheap money', weeks: 12, mult: { valuation: 1.15 } } },
+    { id: 'talentFair', title: 'A legend goes on the market', good: true, scope: 'random', p: 0.4, weight: 0.5, minTurn: 5,
+      text: 'A famous researcher leaves Big Tech and starts taking meetings.',
+      candidate: true, rival: { cap: 0.8, weeks: 0 } },
+    { id: 'cableCut', title: 'Undersea cables cut', good: false, scope: 'all', weight: 0.4, minTurn: 6,
+      text: 'Two undersea cables are severed in the same week. Service across Southeast Asia degrades.',
+      region: { id: 'asia', ban: 0.3, weeks: 6 } },
+    { id: 'gpuGlut', title: 'A GPU glut', good: true, scope: 'cond', weight: 0.5, minTurn: 12,
+      cond: (s) => P(s, 'gpuSpot') || P(s, 'cloudDeal'), rivalP: 0.5,
+      text: 'Over-built neoclouds slash rental prices. Labs that rent compute get a windfall.',
+      fx: [['compute', 0.1, 0.6]], rival: { pace: 1.06, weeks: 8 } },
+  ];
+
+  /* Golden opportunities: click within a few weeks to claim. wrath = may backfire. */
+  FL.OPPORTUNITIES = [
+    { id: 'viralClip', name: 'Viral demo clip', weight: 3, text: 'A user\'s clip of your model is everywhere. Boost it?',
+      buff: { name: 'Viral clip', weeks: 6, fx: { hype: 0.12, brand: 0.03 } } },
+    { id: 'eureka', name: 'Eureka moment', weight: 2, text: 'A researcher is onto something. Clear their calendar?',
+      buff: { name: 'Research frenzy', weeks: 4, mult: { capGain: 1.6 } } },
+    { id: 'whale', name: 'Whale customer', weight: 2, text: 'A Fortune 50 CIO wants to sign today.', cash: 120 },
+    { id: 'launchWindow', name: 'Launch window', weight: 2, text: 'Everyone is paying attention this week. Ship something.',
+      buff: { name: 'Launch window', weeks: 4, mult: { revenue: 1.8 } } },
+    { id: 'quietWeek', name: 'A quiet week', weight: 2, text: 'No fires. Use it.', bandwidth: 6 },
+    { id: 'investorFomo', name: 'Investor FOMO', weight: 1.5, text: 'Your phone is ringing with term sheets.',
+      buff: { name: 'Investor FOMO', weeks: 8, fx: { investors: 0.3 } } },
+    { id: 'gpuFireSale', name: 'GPU fire sale', weight: 1.5, text: 'A neocloud has idle capacity and a deadline.',
+      buff: { name: 'Cheap GPUs', weeks: 8, fx: { compute: 0.1 } } },
+    { id: 'intelDrop', name: 'Intel drop', weight: 1, text: 'Someone left a rival\'s slide deck on a train.', intel: true },
+    { id: 'starDM', name: 'A star slides into your DMs', weight: 1, text: 'A Principal researcher says they are "open to a chat".', candidate: true },
+    { id: 'shadyWeights', name: 'Too good to be true', weight: 0.7, wrath: true, text: 'An anonymous source offers you a rival\'s model weights.',
+      win: { text: 'You learned a lot. Nobody found out. Yet.', cap: 4 },
+      lose: { text: 'It was a sting. Prosecutors and reporters are calling.', fx: [['legal', 0.25, 1], ['regHeat', 0.2, 1], ['trust', -0.15, 1], ['board', -0.3, 0.6]] } },
+    { id: 'shadyData', name: 'A data broker\'s offer', weight: 0.8, wrath: true, text: 'A broker offers a huge private dataset, no questions asked.',
+      win: { text: 'Great data. Clean enough, apparently.', fx: [['data', 0.12, 1]] },
+      lose: { text: 'The data was scraped from private messages. It is on the front page.', fx: [['legal', 0.2, 1], ['trust', -0.12, 1], ['media', -0.3, 0.6]] } },
+  ];
 })(globalThis.FL = globalThis.FL || {});

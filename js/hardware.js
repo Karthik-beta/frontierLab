@@ -70,7 +70,7 @@
   H.costItems = function (state) {
     if (!state.hw) return [];
     const items = [];
-    const opex = H.powerDemand(state) * H.utilization(state) * cfg().opexPerMW;
+    const opex = H.powerDemand(state) * H.utilization(state) * cfg().opexPerMW * (FL.Events ? FL.Events.mult(state, 'opex') : 1);
     if (opex > 0.5) items.push({ label: 'Datacenter power & upkeep', amount: opex, color: '#38bdf8' });
     const lease = state.hw.leases.reduce((a, l) => a + (l.perQuarter || 0), 0);
     if (lease > 0.5) items.push({ label: 'Compute lease commitments', amount: lease, color: '#0ea5e9' });
@@ -219,6 +219,7 @@
     if (tpl.meter) state.meters[tpl.meter[0]] = (state.meters[tpl.meter[0]] || 0) + tpl.meter[1];
     hw.offers = hw.offers.filter((x) => x.id !== offerId);
     state.log.push({ turn: state.turn, text: `Signed: ${o.provider} — ${o.kind}` });
+    E.emit(state, { type: 'deal', text: `Signed ${o.provider}: ${o.kind} (${o.summary})` });
     const res = { ok: true, artifacts: [], achievements: [] };
     if (FL.Systems) {
       FL.Systems.fireTrigger(state, 'deal:' + tpl.id, res);

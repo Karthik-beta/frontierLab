@@ -38,6 +38,7 @@
     state.mkt.bookedAt = state.mkt.bookedAt || {};
     state.mkt.bookedAt[c.id] = state.t || 0;
     state.log.push({ turn: state.turn, text: `Booked campaign: ${c.name}` });
+    E.emit(state, { type: 'booked', text: `Booked campaign: ${c.name}` });
     return { ok: true };
   };
   M.unbook = function (state, id) {

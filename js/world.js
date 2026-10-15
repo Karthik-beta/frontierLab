@@ -48,7 +48,8 @@
   W.tick = function (state, qr, dt) {
     const w = state.world;
     if (!w || state.turn < 2 || E.rand(state) > 0.3 * dt) return;
-    const truthful = E.rand(state) < 0.67;
+    const truthful = (state.flags.insider && !w.insiderUsed) || E.rand(state) < 0.67;
+    if (state.flags.insider) w.insiderUsed = true;
     const pool = FL.WORLD_TRAITS.filter((t) => (truthful ? w.traits.includes(t.id) : !w.traits.includes(t.id)) && !w.hinted.includes(t.id));
     if (!pool.length) return;
     const t = pool[Math.floor(E.rand(state) * pool.length)];

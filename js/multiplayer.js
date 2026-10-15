@@ -108,7 +108,7 @@
     const L = MP.lobby;
     if (L.players.length < 2) { emit('error', 'Add at least one more player or an AI lab first.'); return; }
     L.started = true;
-    L.players.forEach((p, i) => { if (p.bot) MP.bots[p.id] = E.newGame(p.archetype, p.company, L.seed + i * 7919, L.settings.difficulty); });
+    L.players.forEach((p, i) => { if (p.bot) { MP.bots[p.id] = E.newGame(p.archetype, p.company, L.seed + i * 7919, L.settings.difficulty); MP.bots[p.id].mp = { host: false, bot: true }; } });
     Object.keys(MP.bots).forEach((id) => setupRivals(MP.bots[id], id));
     MP.clock = { week: 0, speed: L.settings.speed, at: Date.now() };
     broadcastLobby();
@@ -131,6 +131,13 @@
     }
   };
 
+  /** Host: world events hit every lab at the table; each lab rolls its own subset coin. */
+  MP.broadcastWorldEvent = function (id, salt) {
+    if (!MP.isHost() || !MP.active()) return;
+    MP.conn.send({ type: 'world', id, salt });
+    for (const s of Object.values(MP.bots)) if (!s.ended) FL.Events.applyWorldEvent(s, id, salt, s.qr);
+  };
+
   /** Host: share the clock about once a second. */
   MP.broadcastClock = function (week) {
     if (!MP.isHost() || !MP.active()) return;
@@ -145,6 +152,7 @@
       case 'start': MP.lobby = msg.lobby; MP.clock = { week: 0, speed: msg.lobby.settings.speed, at: Date.now() }; emit('start', MP.lobby); break;
       case 'snaps': MP.lobby.players = msg.players; emit('snaps', msg.players); emit('change', MP.lobby); break;
       case 'clock': MP.clock = { week: msg.week, speed: msg.speed, at: Date.now() }; emit('clock', MP.clock); break;
+      case 'world': emit('world', msg); break;
       case 'chat': MP.lobby.chat.push(msg.line); emit('chat', msg.line); break;
       case 'error': emit('error', msg.error); break;
     }
@@ -185,7 +193,7 @@
     const i = L.players.indexOf(me);
     const s = E.newGame(me.archetype, me.company, L.seed + i * 7919, L.settings.difficulty);
     setupRivals(s, MP.myId);
-    s.mp = { code: L.code };
+    s.mp = { code: L.code, host: MP.isHost() };
     return s;
   };
 

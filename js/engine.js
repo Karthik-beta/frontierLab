@@ -142,7 +142,7 @@
       badBoardTurns: 0, injunctionTurns: 0, flags: {}, ended: null, log: [],
       meters: {}, pitfallsFired: {}, dilemmaQueue: [], objectives: [], objectivesDone: 0,
       milestones: {}, artifacts: [], era: null,
-      week: 0, t: 0, inbox: [], events: [], newspapers: [], qr: null,
+      week: 0, t: 0, inbox: [], events: [], newspapers: [], qr: null, buffs: [], opps: [], journal: [], metrics: [],
     };
     Object.entries(arch.policies).forEach(([id, level]) => (state.policies[id] = { level, since: -8 }));
     FL.STATS.forEach((s) => (state.values[s.id] = s.base + (state.baseMods[s.id] || 0)));
@@ -166,6 +166,7 @@
     state.valuation = E.valuation(state);
     E.recordHistory(state);
     if (FL.Fog) FL.Fog.init(state);
+    if (FL.Growth) FL.Growth.init(state);
     if (FL.Systems) FL.Systems.onNewGame(state);
     state.qr = newQuarterReport(state);
     return state;
@@ -265,7 +266,8 @@
   /** Revenue and cost breakdown for the current quarter ($M). */
   E.computeFinances = function (state) {
     const v = state.values;
-    const revenue = E.marketSize(state) * v.adoption * v.monetization;
+    const share = FL.Growth && state.growth ? FL.Growth.share(state) : v.adoption;
+    const revenue = E.marketSize(state) * share * v.monetization * (FL.Events ? FL.Events.mult(state, 'revenue') : 1);
     const items = [];
     const catTotals = {};
     for (const [id] of Object.entries(state.policies)) {
@@ -301,6 +303,7 @@
     const np = state.policies.nonprofit;
     if (np) val *= 1 - E.node('nonprofit').def.special.valuationHaircut * (0.2 + 0.8 * np.level);
     val *= 1 + 0.3 * E.investorConfidence(state);
+    if (FL.Events) val *= FL.Events.mult(state, 'valuation');
     return Math.max(300, val);
   };
 
@@ -348,6 +351,7 @@
     const t = state.turn - 1;
     let gain = 5.5 * state.values.velocity * (1 + 0.008 * t) * dt;
     if (FL.World) gain *= FL.World.mod(state, 'capGain', 1);
+    if (FL.Events) gain *= FL.Events.mult(state, 'capGain');
     let paused = false;
     if (state.cap > E.pauseThreshold(state)) { gain *= 0.35; paused = true; }
     if (state.active.injunction) gain *= 0.5;
@@ -380,6 +384,7 @@
       r.momentum = clamp((r.momentum || 1) + (E.rand(state) - 0.5) * 0.12 * Math.sqrt(dt * 13), 0.6, 1.5);
       let rate = r.rate * (1 + 0.012 * t) * E.diff(state).rivalPace * r.momentum;
       if (FL.World) rate *= FL.World.mod(state, 'rivalPace', 1);
+      if (r.paceUntil > state.week) rate *= r.paceMult;
       if (r.cap < state.cap - 15) rate *= 1.2; // fast followers distill the leader
       const before = r.cap;
       let step = (rate * (0.6 + 0.8 * E.rand(state)) * (1 - slow) + boost) * dt;
@@ -434,6 +439,7 @@
     const rec = state.turnChanges[id];
     state.bandwidth -= net;
     rec.spent += net;
+    E.emit(state, { type: 'policy', text: newLevel == null ? `Cancelled ${E.node(id).def.name}` : `${cur ? 'Set' : 'Enacted'} ${E.node(id).def.name} at ${Math.round(newLevel * 100)}%` });
     if (newLevel == null) delete state.policies[id];
     else if (cur) cur.level = newLevel;
     else state.policies[id] = { level: newLevel, since: rec.orig != null ? rec.origSince : state.turn };
@@ -526,6 +532,7 @@
     }
     E.updateIndicators(state);
     state.log.push({ turn: state.turn, text: `${d.title}: ${opt.label}` });
+    E.emit(state, { type: 'decided', title: d.title, label: opt.label, result: text });
     const res = { text, artifacts: [], achievements: [] };
     if (FL.Systems) {
       FL.Systems.fireTrigger(state, `dilemma:${d.id}:${optionIndex}`, res);
@@ -586,7 +593,12 @@
   E.TICKS_PER_Q = 13; // one tick = one game week
   E.DT = 1 / E.TICKS_PER_Q;
 
-  E.emit = (state, ev) => { (state.events = state.events || []).push(Object.assign({ week: state.week }, ev)); if (state.events.length > 200) state.events.splice(0, state.events.length - 200); };
+  E.emit = (state, ev) => {
+    ev = Object.assign({ week: state.week }, ev);
+    (state.events = state.events || []).push(ev);
+    if (state.events.length > 200) state.events.splice(0, state.events.length - 200);
+    E.journal(state, ev);
+  };
   E.weekOfQuarter = (state) => state.week % E.TICKS_PER_Q;
   E.timeLabel = (state) => `${E.quarterLabel(state.turn)} · week ${E.weekOfQuarter(state) + 1}`;
 
@@ -670,10 +682,13 @@
     if (FL.World) FL.World.tick(state, qr, dt);
     if (FL.Fog) FL.Fog.tick(state, qr, dt);
     if (FL.Systems) FL.Systems.tick(state, qr, dt);
+    if (FL.Growth) FL.Growth.tick(state, qr, dt);
+    if (FL.Events) FL.Events.tick(state, qr, dt);
     E.rollDilemma(state, dt);
 
     state.week++;
     state.t = state.week / E.TICKS_PER_Q;
+    E.recordMetrics(state);
     E.expireDecisions(state, qr);
 
     let report = null;
@@ -747,10 +762,47 @@
   };
 
   /** Journal: a fog-safe, persistent log of everything observable (for the player and an assisting LLM).
-   * TODO: implement. Acceptance: every emitted event and player action is journaled with week + quarter label. */
-  E.journal = function (state, entry) { throw new Error('NotImplemented: journal'); };
-  /** Weekly observable metrics series. TODO: implement. */
-  E.recordMetrics = function (state) { throw new Error('NotImplemented: recordMetrics'); };
+   * Only events the player could see go in; hidden state never does. */
+  const JOURNAL_SKIP = new Set(['buffEnded', 'unlock']);
+  E.journalText = function (ev) {
+    const nm = (id) => (E.node(id) ? E.node(id).def.name : id);
+    switch (ev.type) {
+      case 'decision': { const d = FL.DILEMMAS.find((x) => x.id === ev.id); return `Decision arrived: ${d ? d.title : ev.id}`; }
+      case 'decided': return `You chose "${ev.label}" on "${ev.title}": ${ev.result}`;
+      case 'expired': return ev.text;
+      case 'situation': return `${nm(ev.id)} ${ev.on ? 'started' : 'ended'}`;
+      case 'warning': return `Warning sign (${ev.horizon}-term, ${ev.name}): ${ev.text}`;
+      case 'milestone': return ev.kind === 'model' ? `Shipped model ${ev.name} (capability ${ev.at})` : `Valuation milestone: ${ev.name}`;
+      case 'funding': return ev.round.text;
+      case 'policy': return ev.text;
+      case 'world': return `World event: ${ev.title}${ev.hitYou ? ' (hit you)' : ' (you were spared)'} — ${ev.text}${ev.rivalsHit && ev.rivalsHit.length ? ` Rivals hit: ${ev.rivalsHit.join(', ')}.` : ''}`;
+      case 'opp': return `Opportunity appeared: ${ev.name}${ev.wrath ? ' (risky)' : ''}`;
+      case 'oppMissed': return `Opportunity missed: ${ev.name}`;
+      case 'claimed': return `Claimed ${ev.name}: ${ev.text}`;
+      case 'buff': return `Effect started: ${ev.name} (${ev.weeks} weeks)`;
+      case 'users': return `Reached ${ev.text}`;
+      default: return ev.text || ev.name || ev.type;
+    }
+  };
+  E.journal = function (state, ev) {
+    if (JOURNAL_SKIP.has(ev.type)) return;
+    state.journal = state.journal || [];
+    state.journal.push({ week: ev.week, when: `${E.quarterLabel(Math.floor(ev.week / E.TICKS_PER_Q) + 1)} wk ${(ev.week % E.TICKS_PER_Q) + 1}`, type: ev.type, text: E.journalText(ev) });
+    if (state.journal.length > 3000) state.journal.splice(0, state.journal.length - 3000);
+  };
+
+  /** Weekly observable metrics series (what the player could have written down). */
+  E.recordMetrics = function (state) {
+    const F = FL.Fog;
+    const row = { week: state.week, cash: Math.round(state.cash), revenueRate: Math.round(state.finance.revenue), costRate: Math.round(state.finance.costs),
+      users: FL.Growth && state.growth ? Math.round(FL.Growth.users(state)) : null, appeal: +state.values.adoption.toFixed(3), capability: +state.cap.toFixed(2),
+      valuation: Math.round(state.valuation), bandwidth: Math.floor(state.bandwidth), hype: +state.values.hype.toFixed(3), brand: +state.values.brand.toFixed(3),
+      safetyEval: F ? +F.measured(state, 'safety').est.toFixed(3) : null, trustPoll: F ? +F.measured(state, 'trust').est.toFixed(3) : null,
+      rivals: F ? Object.fromEntries(state.rivals.map((r) => [r.name, Math.round(F.rivalEstimate(state, r).est)])) : null };
+    state.metrics = state.metrics || [];
+    state.metrics.push(row);
+    if (state.metrics.length > 560) state.metrics.splice(0, state.metrics.length - 560);
+  };
 
   E.serialize = (state) => JSON.stringify(state);
   E.deserialize = (json) => JSON.parse(json);

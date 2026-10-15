@@ -106,6 +106,7 @@
       R.reveal(state, c);
       R.add(state, c);
       state.log.push({ turn: state.turn, text: `Hired ${c.name}, ${R.headline(c)}` });
+      E.emit(state, { type: 'hired', name: c.name, headline: R.headline(c), text: `Hired ${c.name}, ${R.headline(c)}` });
       const exRival = state.rivals.find((r) => c.from === `ex-${r.name.replace(/ \(.*\)/, '')}`);
       if (exRival && FL.Fog) FL.Fog.observeRival(state, exRival.id, exRival.cap + (E.rand(state) - 0.5) * 4, 2, `${c.name} (ex-employee)`);
       const res = { ok: true, accepted: true, person: c, artifacts: [], achievements: [] };
@@ -118,6 +119,7 @@
     }
     const rival = pick(state, state.rivals);
     rival.cap += 0.15 + c.seniority * 0.1;
+    E.emit(state, { type: 'offerDeclined', text: `${c.name} declined your offer and joined ${rival.name}` });
     return { ok: true, accepted: false, text: `${c.name} took an offer from ${rival.name}.` };
   };
 
