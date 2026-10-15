@@ -68,8 +68,8 @@ BOTS.adaptive = (s) => {
   if (s.values.regHeat > 0.45 && !s.policies.lobbying) E.implementPolicy(s, 'lobbying', 0.5);
 };
 
-function play(arch, bot, seed, verbose) {
-  const s = E.newGame(arch, 'Sim', seed);
+function play(arch, bot, seed, verbose, dif) {
+  const s = E.newGame(arch, 'Sim', seed, dif);
   let r;
   while (!s.ended) {
     BOTS[bot](s);
@@ -83,6 +83,7 @@ function play(arch, bot, seed, verbose) {
 }
 
 const N = +(process.argv[2] || 40);
+const DIF = process.env.DIFFICULTY || 'normal';
 if (process.argv[3]) {
   const [arch, bot, seed] = process.argv[3].split(':');
   console.log(play(arch, bot, +seed, true));
@@ -92,7 +93,7 @@ for (const bot of Object.keys(BOTS)) {
   for (const a of FL.ARCHETYPES) {
     const tally = {}; let turns = 0, saf = 0;
     for (let i = 0; i < N; i++) {
-      const r = play(a.id, bot, 1000 + i);
+      const r = play(a.id, bot, 1000 + i, false, DIF);
       tally[r.ending] = (tally[r.ending] || 0) + 1;
       turns += r.turn; saf += r.safety;
     }

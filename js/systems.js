@@ -32,7 +32,9 @@
       const prev = state.meters[p.id] || 0;
       let rate = 0;
       try { rate = p.rate(state, P); } catch (e) { rate = 0; }
-      const m = clamp(prev + (Number.isFinite(rate) ? rate : 0), 0, 1.2);
+      if (!Number.isFinite(rate)) rate = 0;
+      if (rate > 0) rate *= E.diff(state).pitfallPace;
+      const m = clamp(prev + rate, 0, 1.2);
       state.meters[p.id] = m;
       WARN_AT.forEach((t, i) => {
         if (prev < t && m >= t) report.pitfallWarnings.push({ id: p.id, name: p.name, horizon: p.horizon, text: p.warn[i], level: i + 1 });

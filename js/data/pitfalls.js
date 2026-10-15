@@ -111,7 +111,7 @@
       warn: ['A Big Tech corp-dev team keeps "checking in".', 'Your best researchers are taking calls from Big Tech recruiters.'],
       history: 'In March 2024 Microsoft hired Inflection AI\'s co-founders and most of its staff and paid about $650M to license its models, leaving a shell company behind. Amazon did a similar deal with Adept, and Google with Character.AI.',
       lesson: 'Running out of runway does not usually look like bankruptcy. It looks like a generous offer.',
-      rate: (s) => (v(s, 'runway') < 0.3 ? 0.25 : -0.1) + (v(s, 'lead') < 0.4 ? 0.1 : -0.05),
+      rate: (s) => (v(s, 'runway') < 0.25 && v(s, 'lead') < 0.45 ? 0.3 : -0.15),
       event: { title: 'Big Tech Wants Your Team',
         text: 'A trillion-dollar company offers to hire you and your best people and license your models. Your investors get their money back. The company becomes a shell.',
         options: [

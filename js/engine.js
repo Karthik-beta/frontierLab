@@ -113,20 +113,25 @@
   E.contribution = (state, e) => state.contrib[e.idx] || 0;
 
   // ── New game ─────────────────────────────────────────────
-  E.newGame = function (archetypeId, companyName, seed) {
+  /** Difficulty knobs for this game (defaults to Normal). */
+  E.diff = (state) => (FL.DIFFICULTIES || []).find((d) => d.id === (state && state.difficulty)) || (FL.DIFFICULTIES || [])[1] ||
+    { cashMult: 1, bandwidth: 0, bwIncome: 0, rivalPace: 1, pitfallPace: 1, fundingMult: 1, bridges: 1, coupGrace: 2, computeInflation: 1.06, failureMult: 1, aligned: 0.55, uneasy: 0.4 };
+
+  E.newGame = function (archetypeId, companyName, seed, difficulty) {
     const arch = FL.ARCHETYPES.find((a) => a.id === archetypeId) || FL.ARCHETYPES[0];
+    const dif = E.diff({ difficulty: difficulty || 'normal' });
     seed = seed == null ? Math.floor(Math.random() * 1e9) : seed >>> 0;
     const state = {
       version: 1, seed, rngState: seed >>> 0,
-      company: companyName || 'Frontier Labs', archetype: arch.id,
-      turn: 1, cash: arch.cash, bandwidth: arch.bandwidth, bandwidthMod: arch.bandwidthMod || 0,
+      company: companyName || 'Frontier Labs', archetype: arch.id, difficulty: difficulty || 'normal',
+      turn: 1, cash: arch.cash * dif.cashMult, bandwidth: Math.max(4, arch.bandwidth + dif.bandwidth), bandwidthMod: (arch.bandwidthMod || 0) + dif.bwIncome,
       cap: arch.cap, rivals: FL.RIVALS.map((r) => ({ ...r })),
       policies: {}, values: {}, happiness: {}, pressure: {}, active: {},
       contrib: [], shocks: [], baseMods: { ...(arch.baseMods || {}) },
       finance: { revenue: 0, costs: 0, net: 0, items: [] },
       revHistory: [], history: {}, cashHistory: [],
       turnChanges: {}, pendingDilemma: null, dilemmaSeen: {},
-      nextRound: E.FIRST_ROUND, rounds: [], bridgeUsed: false, valuation: 0,
+      nextRound: E.FIRST_ROUND, rounds: [], bridgesUsed: 0, valuation: 0,
       badBoardTurns: 0, injunctionTurns: 0, flags: {}, ended: null, log: [],
       meters: {}, pitfallsFired: {}, dilemmaQueue: [], objectives: [], objectivesDone: 0,
       milestones: {}, artifacts: [], era: null,
@@ -217,7 +222,7 @@
     if (scale === 'compute') {
       const chips = state.policies.chips;
       const mature = chips && state.turn - chips.since >= 6;
-      return 0.5 * Math.pow(1.06, t) * (mature ? 1 - FL.POLICIES.find((p) => p.id === 'chips').special.computeDiscount * (0.2 + 0.8 * chips.level) : 1);
+      return 0.5 * Math.pow(E.diff(state).computeInflation, t) * (mature ? 1 - FL.POLICIES.find((p) => p.id === 'chips').special.computeDiscount * (0.2 + 0.8 * chips.level) : 1);
     }
     if (scale === 'payroll') return 0.5 * (1 + 0.05 * t);
     return 1;
@@ -283,11 +288,11 @@
       state.shocks.push({ to: 'hype', amt: -0.08, turns: 4, left: 4 });
     } else {
       ok = true;
-      raised = val * (0.14 + 0.06 * conf);
+      raised = val * (0.14 + 0.06 * conf) * E.diff(state).fundingMult;
       text = `${name} closed: ${E.fmtMoney(raised)} at a ${E.fmtMoney(val)} valuation.`;
     }
     state.cash += raised;
-    state.bridgeUsed = false;
+    state.bridgesUsed = 0;
     const round = { turn: state.turn, name, raised, valuation: val, ok, text };
     state.rounds.push(round);
     return round;
@@ -336,7 +341,7 @@
     const news = [];
     const boost = E.rivalBoost(state), slow = E.rivalSlow(state);
     for (const r of state.rivals) {
-      let rate = r.rate * (1 + 0.012 * t);
+      let rate = r.rate * (1 + 0.012 * t) * E.diff(state).rivalPace;
       if (r.cap < state.cap - 15) rate *= 1.2; // fast followers distill the leader
       const before = r.cap;
       r.cap += rate * (0.7 + 0.6 * E.rand(state)) * (1 - slow) + boost;
@@ -497,9 +502,10 @@
 
   E.checkEnding = function (state) {
     const s = state.values.safety;
+    const dif = E.diff(state);
     if (state.cap >= E.AGI) {
-      if (s >= 0.55) return { id: 'aligned', win: true, title: 'Aligned AGI', text: `${state.company} built the first AGI — and it is on humanity's side. Safety maturity of ${Math.round(s * 100)}% held when it mattered. The hardest part starts now, but you got the beginning right.` };
-      if (s >= 0.40) return { id: 'uneasy', win: true, title: 'Uneasy Victory', text: `${state.company} reached AGI first. It mostly does what you want. Mostly. With ${Math.round(s * 100)}% safety maturity, nobody on the alignment team is sleeping well.` };
+      if (s >= dif.aligned) return { id: 'aligned', win: true, title: 'Aligned AGI', text: `${state.company} built the first AGI — and it is on humanity's side. Safety maturity of ${Math.round(s * 100)}% held when it mattered. The hardest part starts now, but you got the beginning right.` };
+      if (s >= dif.uneasy) return { id: 'uneasy', win: true, title: 'Uneasy Victory', text: `${state.company} reached AGI first. It mostly does what you want. Mostly. With ${Math.round(s * 100)}% safety maturity, nobody on the alignment team is sleeping well.` };
       return { id: 'misaligned', win: false, title: 'Misaligned', text: `${state.company} reached AGI first with only ${Math.round(s * 100)}% safety maturity. For a few weeks it was the most valuable company in history. Then the model's goals and yours stopped overlapping.` };
     }
     const rival = state.rivals.find((r) => r.cap >= E.AGI);
@@ -562,19 +568,20 @@
     }
 
     if (state.cash < 0) {
-      if (!state.bridgeUsed && E.investorConfidence(state) > -0.4) {
+      if ((state.bridgesUsed || 0) < E.diff(state).bridges && E.investorConfidence(state) > -0.4) {
         const amt = Math.max(-state.cash + 2 * Math.max(0, -state.finance.net), E.valuation(state) * 0.08);
         state.cash += amt;
-        state.bridgeUsed = true;
+        state.bridgesUsed = (state.bridgesUsed || 0) + 1;
         state.shocks.push({ to: 'board', amt: -0.3, turns: 6, left: 6 });
         state.shocks.push({ to: 'investors', amt: -0.2, turns: 6, left: 6 });
-        report.bridge = `You ran out of cash. Investors grudgingly wired a ${E.fmtMoney(amt)} emergency bridge. They won't do it twice before the next round.`;
+        report.bridge = `You ran out of cash. Investors grudgingly wired a ${E.fmtMoney(amt)} emergency bridge.${state.bridgesUsed >= E.diff(state).bridges ? " They won't do it again before the next round." : ''}`;
       } else state.flags.bankrupt = true;
     }
 
     if (state.happiness.board < -0.45) {
       state.badBoardTurns++;
-      if (state.badBoardTurns >= 2 && E.rand(state) < 0.35 + 0.15 * (state.badBoardTurns - 2)) state.flags.ousted = true;
+      const grace = E.diff(state).coupGrace;
+      if (state.badBoardTurns >= grace && E.rand(state) < 0.35 + 0.15 * (state.badBoardTurns - grace)) state.flags.ousted = true;
       else report.warnings.push('The board is openly discussing replacing you. Win them back fast: runway, regulators and lawsuits are what they care about.');
     } else state.badBoardTurns = 0;
     if (state.active.injunction) {
