@@ -104,6 +104,9 @@
     if (report.finance && report.finance.net > 0 && report.finance.revenue > 50) S.fireTrigger(state, 'profitable', report);
     if (report.paused) S.fireTrigger(state, 'rsp:pause', report);
     if (report.news && report.news.length) S.fireTrigger(state, 'rival:release', report);
+    state.peakValuation = Math.max(state.peakValuation || 0, state.valuation);
+    if (state.peakValuation > 5000 && state.valuation < state.peakValuation * 0.25) S.fireTrigger(state, 'valuation:crash', report);
+    if ((state.ownership || 100) < 10) S.fireTrigger(state, 'ownership:10', report);
     S.fireTrigger(state, 'turn:' + state.turn, report);
   };
 

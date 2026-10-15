@@ -135,8 +135,19 @@
       return false;
     });
 
+    hw.failedTotal = (hw.failedTotal || 0) + res.failed;
     H.rollOffers(state, res);
-    if (report) report.hardware = res;
+    if (report) {
+      report.hardware = res;
+      const T = (k) => FL.Systems && FL.Systems.fireTrigger(state, k, report);
+      if (res.newGen) {
+        T('hw:newGen');
+        const old = hw.fleet.filter((c) => FL.CHIP_GENS.indexOf(genById(c.gen)) <= FL.CHIP_GENS.indexOf(gen) - 2).reduce((a, c) => a + c.pods, 0);
+        if (old >= 10) T('hw:obsolete');
+      }
+      if (res.delivered > 0) T('hw:firstDelivery');
+      if (hw.failedTotal >= 10) T('hw:failures');
+    }
     return res;
   };
 
@@ -197,7 +208,10 @@
     hw.offers = hw.offers.filter((x) => x.id !== offerId);
     state.log.push({ turn: state.turn, text: `Signed: ${o.provider} — ${o.kind}` });
     const res = { ok: true, artifacts: [], achievements: [] };
-    if (FL.Systems) FL.Systems.fireTrigger(state, 'deal:' + tpl.id, res);
+    if (FL.Systems) {
+      FL.Systems.fireTrigger(state, 'deal:' + tpl.id, res);
+      if (state.active.gpuCrunch) FL.Systems.fireTrigger(state, 'deal:duringShortage', res);
+    }
     return res;
   };
 
@@ -214,7 +228,9 @@
     state.cash += price;
     hw.fleet = hw.fleet.filter((x) => x !== c);
     state.log.push({ turn: state.turn, text: `Sold ${Math.round(c.pods)} ${genById(c.gen).name} pods for ${E.fmtMoney(price)}` });
-    return { ok: true, price };
+    const res = { ok: true, price, artifacts: [], achievements: [] };
+    if (FL.Systems && price < c.cost * 0.5) FL.Systems.fireTrigger(state, 'hw:soldAtLoss', res);
+    return res;
   };
 
   H.summary = function (state) {

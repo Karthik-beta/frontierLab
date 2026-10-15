@@ -470,6 +470,8 @@
     if (o.special === 'oust') state.flags.ousted = true;
     if (o.special === 'acquihire') state.flags.acquihired = true;
     if (o.special === 'reinstate') state.flags.reinstated = true;
+    if (o.special === 'cultureReset' && FL.Hiring) FL.Hiring.cultureReset(state);
+    if (o.dropPractice && state.people) state.people.practices[o.dropPractice] = false;
   }
 
   /** Cash amounts in late-game events scale with the size of the company. */
@@ -496,6 +498,7 @@
       const bad = E.rand(state) < (opt.chance.useStakeholder ? 1 - p : p);
       const out = bad ? opt.chance.lose : opt.chance.win;
       if (out) { applyOutcome(state, out); text = out.text; }
+      state._outcome = bad ? 'lose' : 'win';
     }
     E.updateIndicators(state);
     state.log.push({ turn: state.turn, text: `${d.title}: ${opt.label}` });
@@ -503,6 +506,8 @@
     if (FL.Systems) {
       FL.Systems.fireTrigger(state, `dilemma:${d.id}:${optionIndex}`, res);
       FL.Systems.fireTrigger(state, `dilemma:${d.id}`, res);
+      if (state._outcome) FL.Systems.fireTrigger(state, `dilemma:${d.id}:${optionIndex}:${state._outcome}`, res);
+      delete state._outcome;
       if (state.flags.reinstated && !state.flags.reinstatedSeen) { state.flags.reinstatedSeen = true; FL.Systems.fireTrigger(state, 'reinstated', res); }
       if (state.flags.spawnedRival) FL.Systems.fireTrigger(state, 'rival:spawned', res);
     }
