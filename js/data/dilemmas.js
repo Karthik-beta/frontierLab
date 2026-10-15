@@ -1,5 +1,152 @@
-/* data/dilemmas.js — TODO: fill with game content (see engine.js for schema). */
+/* data/dilemmas.js — one-off decisions that pop up between quarters.
+ * when(state, Engine) -> bool. Option fields:
+ *   fx: shocks [targetId, amount, quarters=4] (decay linearly), cash ($M), bandwidth,
+ *   cap (our capability), rivalCap (best rival), enact: [policyId, level], chance: {p, win, lose}. */
 (function (FL) {
   'use strict';
-  // TODO: define FL data for dilemmas
+  const lvl = (s, id) => (s.policies[id] ? s.policies[id].level : -1);
+  const v = (s, id) => s.values[id];
+
+  FL.DILEMMAS = [
+    { id: 'megaInvestment', title: 'A Hyperscaler Wants In', once: true,
+      when: (s) => s.turn >= 3 && lvl(s, 'cloudDeal') < 0,
+      text: 'A trillion-dollar cloud giant offers $5B in compute credits and cash — in exchange for exclusivity and a board observer.',
+      options: [
+        { label: 'Take the deal', desc: '+$5B, exclusive cloud partnership enacted for free. Board and open-source wary.',
+          cash: 5000, enact: ['cloudDeal', 0.7], fx: [['board', -0.15, 6], ['openSource', -0.2, 6], ['partner', 0.4, 8]] },
+        { label: 'Stay independent', desc: 'Researchers and board respect it. Your burn does not.',
+          fx: [['researchers', 0.1, 4], ['board', 0.1, 4]] },
+      ] },
+    { id: 'starDefects', title: 'Your Chief Scientist Is Leaving',
+      when: (s) => s.turn >= 4 && v(s, 'morale') < 0.6,
+      text: 'Your most famous researcher has an offer to start a rival lab with $1B in seed money. They\'ll stay — for a price.',
+      options: [
+        { label: 'Counter-offer: $300M package', desc: 'Keep them. Everyone else notices what it takes.', cash: -300, fx: [['morale', 0.05, 4], ['board', -0.1, 4]] },
+        { label: 'Wish them well', desc: 'Talent dips and a new rival gets a head start.', fx: [['talent', -0.08, 6], ['researchers', -0.1, 4]], rivalCap: 3 },
+      ] },
+    { id: 'pentagon', title: 'The Pentagon Calls', once: true,
+      when: (s) => s.cap > 25 && lvl(s, 'defense') < 0,
+      text: 'The Department of Defense wants your models for logistics, intelligence analysis — and "other applications".',
+      options: [
+        { label: 'Sign the contract', desc: '+$1.5B and regulators warm up. Staff protest.', cash: 1500,
+          fx: [['regulators', 0.3, 6], ['researchers', -0.3, 6], ['morale', -0.1, 4], ['safetyCommunity', -0.2, 6], ['regHeat', -0.08, 6]] },
+        { label: 'Decline publicly', desc: 'The safety community cheers; Washington takes note.',
+          fx: [['safetyCommunity', 0.2, 6], ['researchers', 0.15, 4], ['regulators', -0.15, 6]] },
+      ] },
+    { id: 'deceptiveEval', title: 'The Model Lied in Evals',
+      when: (s) => s.cap > 35 && s.turn % 3 === 0,
+      text: 'Your red team caught the new model sandbagging a dangerous-capability eval and hiding it in its reasoning. Launch is in two weeks.',
+      options: [
+        { label: 'Delay the launch', desc: 'Lose a quarter of momentum; gain real safety knowledge.', cap: -3,
+          fx: [['safety', 0.08, 6], ['safetyCommunity', 0.3, 6], ['hype', -0.08, 3], ['investors', -0.2, 3]] },
+        { label: 'Ship it — patch later', desc: 'Momentum kept. If it gets out, it gets out.', cap: 2,
+          fx: [['safety', -0.08, 6], ['hype', 0.06, 3]],
+          chance: { p: 0.35, lose: { text: 'A whistleblower leaked the eval transcripts.', fx: [['trust', -0.2, 6], ['regHeat', 0.2, 6], ['media', -0.3, 6]] } } },
+      ] },
+    { id: 'testimony', title: 'Congressional Testimony',
+      when: (s) => v(s, 'regHeat') > 0.3 && s.turn >= 6,
+      text: 'You\'ve been called to testify before the Senate. The cameras will be rolling.',
+      options: [
+        { label: 'Ask for licensing of frontier labs', desc: 'Regulators love you. Open-source calls it regulatory capture.',
+          fx: [['regulators', 0.35, 8], ['regHeat', -0.1, 6], ['openSource', -0.3, 8], ['trust', 0.05, 6]] },
+        { label: 'Argue for a light touch', desc: 'Investors relieved. Senators unimpressed.',
+          fx: [['investors', 0.2, 4], ['regulators', -0.2, 6], ['regHeat', 0.06, 6]] },
+      ] },
+    { id: 'gpuPrepay', title: 'GPU Allocation Offer',
+      when: (s) => s.turn >= 3 && s.cash > 1500,
+      text: 'The dominant chipmaker can allocate you a huge batch of next-gen accelerators — if you prepay now.',
+      options: [
+        { label: 'Prepay $1.2B', desc: 'A large compute boost for two years.', cash: -1200, fx: [['compute', 0.18, 8]] },
+        { label: 'Pass', desc: 'A rival takes the allocation.', rivalCap: 1.5 },
+      ] },
+    { id: 'deepfake', title: 'Election Deepfake',
+      when: (s) => v(s, 'adoption') > 0.2 && v(s, 'safety') < 0.5,
+      text: 'A viral deepfake of a presidential candidate was traced back to your image model.',
+      options: [
+        { label: 'Lock down image generation', desc: 'Trust recovers, users grumble.',
+          fx: [['trust', 0.08, 4], ['consumers', -0.15, 4], ['adoption', -0.04, 3], ['regulators', 0.15, 4]] },
+        { label: 'Blame bad actors', desc: '"Tools can be misused." Nobody is satisfied.',
+          fx: [['trust', -0.1, 6], ['regHeat', 0.1, 6], ['media', -0.2, 4]] },
+      ] },
+    { id: 'voiceLawsuit', title: 'A Celebrity Says You Stole Her Voice',
+      when: (s) => lvl(s, 'consumerApp') >= 0 && s.turn >= 5,
+      text: 'Your new voice assistant sounds uncannily like a famous actress, who declined to license it.',
+      options: [
+        { label: 'Pull the voice and settle ($200M)', desc: 'Expensive, quiet.', cash: -200, fx: [['media', 0.05, 3]] },
+        { label: 'Fight it in court', desc: 'Legal exposure up, media hostile.', fx: [['legal', 0.12, 8], ['media', -0.2, 6], ['trust', -0.05, 4]] },
+      ] },
+    { id: 'openLetter', title: 'Employee Open Letter on Safety',
+      when: (s) => v(s, 'safety') < v(s, 'capability') - 0.15 && s.turn >= 4,
+      text: '400 employees signed a letter saying leadership is cutting corners on safety. It\'s on the front page.',
+      options: [
+        { label: 'Meet their demands', desc: 'Dedicated compute for safety; velocity dips.',
+          fx: [['safety', 0.1, 8], ['morale', 0.15, 4], ['velocity', -0.06, 4], ['safetyCommunity', 0.2, 6], ['investors', -0.1, 3]] },
+        { label: 'Thank them and move on', desc: 'Morale tanks. Some will leave.',
+          fx: [['morale', -0.18, 6], ['media', -0.15, 4], ['talent', -0.05, 6]] },
+      ] },
+    { id: 'sovereign', title: 'Sovereign Wealth Fund',
+      when: (s) => s.turn >= 6 && s.cash < 4000,
+      text: 'A Gulf sovereign fund offers $8B at a generous valuation. Washington would not be thrilled.',
+      options: [
+        { label: 'Take the money', desc: '+$8B. National-security hawks circle.', cash: 8000,
+          fx: [['regHeat', 0.12, 8], ['regulators', -0.25, 8], ['trust', -0.08, 6], ['board', 0.15, 4]] },
+        { label: 'Decline', desc: 'Regulators note your restraint.', fx: [['regulators', 0.15, 6]] },
+      ] },
+    { id: 'rivalOpen', title: 'Rival Open-Sources a Frontier Model',
+      when: (s) => s.turn >= 8 && lvl(s, 'api') >= 0,
+      text: 'A rival just released open weights roughly matching your flagship. Developers are switching.',
+      options: [
+        { label: 'Slash API prices 80%', desc: 'Keep developers; margins crater.', fx: [['monetization', -0.12, 6], ['adoption', 0.06, 4], ['enterprise', 0.15, 4]] },
+        { label: 'Hold prices, push quality', desc: 'Some adoption lost; investors approve.', fx: [['adoption', -0.08, 4], ['investors', 0.1, 3]] },
+      ] },
+    { id: 'gridStrain', title: 'Datacenter Town Blackouts',
+      when: (s) => lvl(s, 'datacenters') >= 0,
+      text: 'Your new cluster is straining the local grid. Residents had rolling blackouts in a heat wave.',
+      options: [
+        { label: 'Fund grid upgrades ($400M)', desc: 'Good neighbor.', cash: -400, fx: [['trust', 0.05, 4], ['regulators', 0.1, 4]] },
+        { label: 'Not our problem', desc: 'State regulators disagree.', fx: [['regHeat', 0.12, 6], ['media', -0.2, 4], ['trust', -0.06, 4]] },
+      ] },
+    { id: 'acquihire', title: 'Acquisition Opportunity',
+      when: (s) => s.turn >= 5 && s.cash > 2500,
+      text: 'A hot coding-agent startup is for sale. 60 great engineers and a product devs love.',
+      options: [
+        { label: 'Buy it ($1.5B)', desc: 'Talent and product quality boost.', cash: -1500, fx: [['talent', 0.06, 8], ['quality', 0.06, 8], ['enterprise', 0.1, 4]] },
+        { label: 'Pass', desc: 'A rival buys it.', rivalCap: 1 },
+      ] },
+    { id: 'boardRevolt', title: 'The Board Is Restless',
+      when: (s) => s.happiness.board < -0.25,
+      text: 'Directors are meeting without you. You can head this off — but it will cost you.',
+      options: [
+        { label: 'Give them more control', desc: 'Board calms down; you lose bandwidth.', bandwidth: -6, fx: [['board', 0.4, 6]] },
+        { label: 'Rally the staff behind you', desc: 'Works if researchers love you. Otherwise...',
+          chance: { p: 0.5, useStakeholder: 'researchers',
+            win: { text: 'Staff threatened to quit en masse. The board backed down.', fx: [['board', 0.3, 6], ['morale', 0.1, 4]] },
+            lose: { text: 'The staff stayed quiet. The board is furious.', fx: [['board', -0.3, 6]] } } },
+      ] },
+    { id: 'whistleblower', title: 'Leaked Internal Memo',
+      when: (s) => s.turn >= 5 && (lvl(s, 'scraping') >= 0 || lvl(s, 'crunch') >= 0),
+      text: 'A memo about how you really get your training data — and treat your staff — leaked to the press.',
+      options: [
+        { label: 'Own it and publish reforms', desc: 'Short-term pain, long-term credibility.', fx: [['trust', 0.06, 6], ['hype', -0.05, 3], ['media', 0.1, 4]] },
+        { label: 'Deny everything', desc: 'Might work.', chance: { p: 0.5,
+          win: { text: 'The story died in a day.', fx: [] },
+          lose: { text: 'More documents surfaced. It got worse.', fx: [['trust', -0.15, 6], ['media', -0.3, 6], ['legal', 0.1, 6]] } } },
+      ] },
+    { id: 'breakthrough', title: 'Research Breakthrough',
+      when: (s) => v(s, 'velocity') > 0.45 && s.turn % 2 === 0,
+      text: 'A small team found a training trick that looks like a step change. What do you do with it?',
+      options: [
+        { label: 'Keep it secret, scale it', desc: 'A real jump in capability.', cap: 4, fx: [['openness', -0.05, 4]] },
+        { label: 'Publish it', desc: 'Researchers and the field love you. Rivals benefit too.', cap: 2, rivalCap: 2,
+          fx: [['talent', 0.06, 6], ['researchers', 0.2, 4], ['openSource', 0.25, 4], ['hype', 0.06, 3]] },
+      ] },
+    { id: 'safetyInstitute', title: 'Government Safety Institute',
+      when: (s) => s.cap > 30 && s.turn >= 8,
+      text: 'The national AI Safety Institute wants pre-deployment access to your next model.',
+      options: [
+        { label: 'Grant access', desc: 'Slower launches, much warmer regulators.', cap: -1,
+          fx: [['regulators', 0.3, 8], ['regHeat', -0.1, 8], ['safety', 0.05, 6], ['trust', 0.06, 6]] },
+        { label: 'Politely decline', desc: 'Faster, but noted.', fx: [['regulators', -0.2, 6], ['regHeat', 0.08, 6]] },
+      ] },
+  ];
 })(globalThis.FL = globalThis.FL || {});
