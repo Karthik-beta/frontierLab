@@ -128,6 +128,8 @@
       turnChanges: {}, pendingDilemma: null, dilemmaSeen: {},
       nextRound: E.FIRST_ROUND, rounds: [], bridgeUsed: false, valuation: 0,
       badBoardTurns: 0, injunctionTurns: 0, flags: {}, ended: null, log: [],
+      meters: {}, pitfallsFired: {}, dilemmaQueue: [], objectives: [], objectivesDone: 0,
+      milestones: {}, artifacts: [], era: null,
     };
     Object.entries(arch.policies).forEach(([id, level]) => (state.policies[id] = { level, since: -8 }));
     FL.STATS.forEach((s) => (state.values[s.id] = s.base + (state.baseMods[s.id] || 0)));
@@ -145,6 +147,7 @@
     E.updateIndicators(state);
     state.valuation = E.valuation(state);
     E.recordHistory(state);
+    if (FL.Systems) FL.Systems.onNewGame(state);
     return state;
   };
 
@@ -401,6 +404,10 @@
   // ── Dilemmas ─────────────────────────────────────────────
   E.rollDilemma = function (state) {
     if (state.pendingDilemma) return null;
+    if (state.dilemmaQueue && state.dilemmaQueue.length) {
+      state.pendingDilemma = state.dilemmaQueue.shift();
+      return state.pendingDilemma;
+    }
     const restless = FL.DILEMMAS.find((d) => d.id === 'boardRevolt');
     const lastRevolt = state.dilemmaSeen.boardRevolt;
     if (restless && state.happiness.board < -0.3 && (lastRevolt == null || state.turn - lastRevolt >= 4)) {
@@ -408,7 +415,8 @@
       state.dilemmaSeen[restless.id] = state.turn;
       return restless.id;
     }
-    if (E.rand(state) > 0.45) return null;
+    const chance = FL.Systems ? FL.Systems.dilemmaChance(state) : 0.45;
+    if (E.rand(state) > chance) return null;
     const eligible = FL.DILEMMAS.filter((d) => {
       const seen = state.dilemmaSeen[d.id];
       if (seen != null && (d.once || state.turn - seen < 8)) return false;
@@ -417,13 +425,14 @@
     if (!eligible.length) return null;
     const d = eligible[Math.floor(E.rand(state) * eligible.length)];
     state.pendingDilemma = d.id;
+    state.lastEventTurn = state.turn;
     state.dilemmaSeen[d.id] = state.turn;
     return d.id;
   };
 
   function applyOutcome(state, o) {
     (o.fx || []).forEach(([to, amt, turns]) => state.shocks.push({ to, amt, turns: turns || 4, left: turns || 4 }));
-    if (o.cash) state.cash += o.cash;
+    if (o.cash) state.cash += E.eventCash(state, o);
     if (o.bandwidth) state.bandwidth = Math.max(0, state.bandwidth + o.bandwidth);
     if (o.cap) state.cap = Math.max(0, state.cap + o.cap);
     if (o.rivalCap) E.bestRival(state).cap += o.rivalCap;
@@ -431,7 +440,22 @@
       const [pid, level] = o.enact;
       if (!state.policies[pid]) state.policies[pid] = { level, since: state.turn };
     }
+    if (o.cancel) delete state.policies[o.cancel];
+    if (o.spawnRival) E.spawnRival(state, o.spawnRival.name, o.spawnRival.frac);
+    if (o.special === 'oust') state.flags.ousted = true;
+    if (o.special === 'acquihire') state.flags.acquihired = true;
+    if (o.special === 'reinstate') state.flags.reinstated = true;
   }
+
+  /** Cash amounts in late-game events scale with the size of the company. */
+  E.eventCash = (state, o) => (o.scaleCash ? o.cash * Math.pow(1.06, state.turn - 1) : o.cash);
+
+  E.spawnRival = function (state, name, frac) {
+    const colors = ['#c084fc', '#fb7185', '#2dd4bf', '#fde047'];
+    const n = state.rivals.length;
+    state.rivals.push({ id: 'spawn' + n, name, color: colors[n % colors.length], cap: state.cap * frac, rate: 2.0, spawned: state.turn });
+    state.flags.spawnedRival = true;
+  };
 
   /** Apply the chosen option of the pending dilemma. Returns {text}. */
   E.resolveDilemma = function (state, optionIndex) {
@@ -450,7 +474,20 @@
     }
     E.updateIndicators(state);
     state.log.push({ turn: state.turn, text: `${d.title}: ${opt.label}` });
-    return { text };
+    const res = { text, artifacts: [], achievements: [] };
+    if (FL.Systems) {
+      FL.Systems.fireTrigger(state, `dilemma:${d.id}:${optionIndex}`, res);
+      FL.Systems.fireTrigger(state, `dilemma:${d.id}`, res);
+      if (state.flags.reinstated && !state.flags.reinstatedSeen) { state.flags.reinstatedSeen = true; FL.Systems.fireTrigger(state, 'reinstated', res); }
+      if (state.flags.spawnedRival) FL.Systems.fireTrigger(state, 'rival:spawned', res);
+    }
+    const end = E.checkEnding(state);
+    if (end) {
+      state.ended = end;
+      res.ending = end;
+      if (FL.Systems) FL.Systems.fireTrigger(state, 'ending:' + end.id, res);
+    }
+    return res;
   };
 
   // ── Endings ──────────────────────────────────────────────
@@ -468,6 +505,7 @@
     const rival = state.rivals.find((r) => r.cap >= E.AGI);
     if (rival) return { id: 'lostRace', win: false, title: 'Second Place', text: `${rival.name} announced AGI. Your models — at capability ${Math.floor(state.cap)} — are suddenly a footnote.` };
     if (state.flags.bankrupt) return { id: 'bankrupt', win: false, title: 'Out of Money', text: `${state.company} ran out of cash and nobody would bridge you. The GPUs went to a rival at auction.` };
+    if (state.flags.acquihired) return { id: 'acquihired', win: false, title: 'Acquihired', text: `Big Tech hired you and most of ${state.company} and licensed the models. Investors got roughly their money back. The company that was going to build AGI is now a line item in someone else's earnings call.` };
     if (state.flags.ousted) return { id: 'ousted', win: false, title: 'Fired by the Board', text: 'The board announced it had "lost confidence in your leadership". You found out from a Google Meet invite.' };
     if (state.injunctionTurns >= 3) return { id: 'shutdown', win: false, title: 'Shut Down', text: 'After three quarters under a federal injunction, the company was broken up and its frontier program nationalised.' };
     if (state.turn > E.MAX_TURNS) return { id: 'timeout', win: E.approval(state) > 0 && state.cap > E.bestRival(state).cap, title: 'A Decade Later', text: `Ten years in, nobody has AGI yet. ${state.company} sits at capability ${Math.floor(state.cap)} against ${E.bestRival(state).name}'s ${Math.floor(E.bestRival(state).cap)}.` };
@@ -492,7 +530,7 @@
   /** Advance one quarter; returns a report for the UI. */
   E.endTurn = function (state) {
     if (state.ended) return null;
-    const before = { ...state.values };
+    const before = { ...state.values, _cap: state.cap, _val: state.valuation };
     const label = E.quarterLabel(state.turn);
     const report = { turn: state.turn, label, warnings: [], news: [] };
 
@@ -558,9 +596,12 @@
       .filter((d) => Math.abs(d.to - d.from) >= 0.02)
       .sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
 
+    if (FL.Systems) FL.Systems.run(state, report, before);
     report.ending = E.checkEnding(state);
-    if (report.ending) state.ended = report.ending;
-    else report.dilemma = E.rollDilemma(state);
+    if (report.ending) {
+      state.ended = report.ending;
+      if (FL.Systems) FL.Systems.fireTrigger(state, 'ending:' + report.ending.id, report);
+    } else report.dilemma = E.rollDilemma(state);
     return report;
   };
 

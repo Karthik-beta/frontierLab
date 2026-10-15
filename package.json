@@ -4,7 +4,7 @@
   "private": true,
   "description": "A Democracy-style management sim about running a frontier AI lab.",
   "scripts": {
-    "test": "node --test test/engine.test.js",
+    "test": "node --test test/engine.test.js test/systems.test.js",
     "sim": "node tools/simulate.js",
     "start": "open index.html"
   }

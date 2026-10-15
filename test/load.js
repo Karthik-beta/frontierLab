@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const FILES = ['data/stats', 'data/policies', 'data/stakeholders', 'data/situations', 'data/dilemmas', 'data/archetypes', 'engine'];
+const FILES = ['data/stats', 'data/policies', 'data/stakeholders', 'data/situations', 'data/dilemmas', 'data/archetypes',
+  'data/pitfalls', 'data/archive', 'data/progression', 'engine', 'systems'];
 
 module.exports = function load() {
   const ctx = vm.createContext({ console, Math, JSON });
