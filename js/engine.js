@@ -746,6 +746,12 @@
     return report;
   };
 
+  /** Journal: a fog-safe, persistent log of everything observable (for the player and an assisting LLM).
+   * TODO: implement. Acceptance: every emitted event and player action is journaled with week + quarter label. */
+  E.journal = function (state, entry) { throw new Error('NotImplemented: journal'); };
+  /** Weekly observable metrics series. TODO: implement. */
+  E.recordMetrics = function (state) { throw new Error('NotImplemented: recordMetrics'); };
+
   E.serialize = (state) => JSON.stringify(state);
   E.deserialize = (json) => JSON.parse(json);
 
