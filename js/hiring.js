@@ -174,11 +174,14 @@
   /** Per-quarter toxicity inflow from people, practices and values. */
   R.toxicityFlow = function (state) {
     const P = state.people;
-    let t = -0.02;
-    for (const p of P.roster) for (const tr of p.traits) t += traitOf(tr).toxicity || 0;
+    let t = -0.045;
+    // People: sub-linear in headcount (one jerk in a team of ten is worse than ten jerks in a thousand).
+    let people = 0;
+    for (const p of P.roster) for (const tr of p.traits) people += traitOf(tr).toxicity || 0;
+    t += people / Math.sqrt(Math.max(1, P.roster.length / 6));
     for (const x of activePractices(state)) t += x.toxicity || 0;
     for (const v of activeValues(state)) t += v.toxicity || 0;
-    if (activeValues(state).filter((v) => v.uber).length >= 3) t += 0.015; // a full "Superpumped" culture compounds
+    if (activeValues(state).filter((v) => v.uber).length >= 3) t += 0.01; // a full "Superpumped" culture compounds
     const mult = activePractices(state).reduce((m, x) => m * (x.toxicityMult || 1), 1);
     return t > 0 ? t * mult : t;
   };

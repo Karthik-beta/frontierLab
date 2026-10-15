@@ -218,7 +218,7 @@
   /** Sell an owned cluster on the secondary market. Older generations fetch much less. */
   H.salePrice = function (state, c) {
     const g = genById(c.gen);
-    return c.pods * g.price * c.health * 0.7 * Math.pow(g.perf / H.currentGen(state).perf, 0.6);
+    return c.pods * g.price * c.health * 0.45 * Math.pow(g.perf / H.currentGen(state).perf, 0.6);
   };
   H.sellCluster = function (state, clusterId) {
     const hw = state.hw;

@@ -14,6 +14,8 @@
   let hovered = null;
   let preview = {};       // policy id -> slider level not yet applied
   let pickedArch = FL.ARCHETYPES[0].id;
+  let pickedDiff = 'normal';
+  const HW = FL.Hardware, HR = FL.Hiring;
   let lastReport = null;
   let celebrations = [];
   let busy = false;
@@ -262,6 +264,8 @@
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
+      <button class="btn" data-action="hiring">Recruiting${S.people && S.people.feed.length ? ` <b>${S.people.feed.length}</b>` : ''}</button>
+      <button class="btn" data-action="compute">Compute${S.hw && S.hw.offers.length ? ` <b class="pos">${S.hw.offers.length} deal${S.hw.offers.length > 1 ? 's' : ''}</b>` : ''}</button>
       <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b>/${FL.ARCHIVE.length}</button>
       <button class="btn" data-action="mute" title="Sound (M)">${A.isMuted() ? 'Muted' : 'Sound'}</button>
       <button class="btn" data-action="briefing">Briefing</button>
@@ -327,7 +331,15 @@
     const live = ins.filter((e) => Math.abs(E.contribution(S, e)) > 0.002)
       .sort((a, b) => Math.abs(E.contribution(S, b)) - Math.abs(E.contribution(S, a)));
     const levers = ins.filter((e) => E.nodeType(e.from) === 'policy' && !S.policies[e.from]);
-    let h = `<h3>Driven by</h3>` + (live.length ? live.map((e) => effRowFrom(e)).join('') : '<p class="note">Nothing is moving this yet.</p>');
+    const extras = Object.entries(S.extra || {}).map(([k, m]) => [k, m[id]]).filter(([, v]) => v && Math.abs(v) > 0.002);
+    const extraRows = extras.map(([k, v]) => {
+      const inp = E.extraInputs.find((x) => x.id === k);
+      const col = (v * (isGood(id) ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
+      return `<div class="eff" data-action="${k === 'hardware' ? 'compute' : 'hiring'}"><span>${esc(inp ? inp.label : k)} <span class="tag">open</span></span>
+        <div class="cbar"><span style="background:${col};${v >= 0 ? 'left:50%' : 'right:50%'};width:${Math.min(100, Math.abs(v) * 220) / 2}%"></span></div>
+        <span class="num" style="color:${col}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}</span></div>`;
+    }).join('');
+    let h = `<h3>Driven by</h3>` + extraRows + (live.length ? live.map((e) => effRowFrom(e)).join('') : extraRows ? '' : '<p class="note">Nothing is moving this yet.</p>');
     if (levers.length) h += `<h3>Policies you could enact</h3>` + levers.map((e) => effRowFrom(e, true)).join('');
     return h;
   }
@@ -485,6 +497,11 @@
       ${items}
       <div class="fin-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px"><b>Net</b><span class="m ${f.net >= 0 ? 'pos' : 'neg'}">${money(f.net)}</span></div>
       ${spark(S.history._cash, 300, 40, { color: '#7dd3fc', zero: 0 })}
+      <h3>Company</h3>
+      <div class="row"><span>You and staff own</span><span class="m">${(S.ownership || 100).toFixed(1)}%</span></div>
+      ${S.people ? `<div class="row"><span>Named team</span><span class="m">${S.people.roster.length} people</span></div>
+      <div class="row"><span>Culture toxicity</span><span class="m" style="color:${goodColor(1 - S.people.toxicity * 1.6)}">${pct(S.people.toxicity)}</span></div>` : ''}
+      ${S.hw ? `<div class="row"><span>Compute vs frontier need</span><span class="m">${(HW.summary(S).ratio * 100).toFixed(0)}%</span></div>` : ''}
       <h3>Funding</h3>
       <div class="row"><span>Next round</span><span class="m">${toRound <= 0 ? 'this quarter' : `in ${toRound} quarter${toRound > 1 ? 's' : ''}`}</span></div>
       <div class="row"><span>Valuation now</span><span class="m">${money(S.valuation)}</span></div>
@@ -510,8 +527,8 @@
   }
 
   // ── modals ───────────────────────────────────────────────
-  function openModal(html) { $('modalCard').innerHTML = html; $('modal').classList.remove('hidden'); $('modalCard').scrollTop = 0; }
-  function closeModal() { $('modal').classList.add('hidden'); }
+  function openModal(html) { $('modalCard').classList.remove('wide'); $('modalCard').innerHTML = html; $('modal').classList.remove('hidden'); $('modalCard').scrollTop = 0; }
+  function closeModal() { $('modal').classList.add('hidden'); $('modalCard').classList.remove('wide'); valueDraft = null; }
 
   UI.showStart = function () {
     const saved = loadSave();
@@ -531,6 +548,9 @@
       <input class="name-input" id="coName" value="${esc((saved && saved.company) || 'Frontier Labs')}" maxlength="32">
       <h3>Choose your origin story</h3>
       <div class="cards">${cards}</div>
+      <h3>Difficulty</h3>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${FL.DIFFICULTIES.map((d) => `
+        <button class="card ${d.id === pickedDiff ? 'sel' : ''}" data-action="pickDiff" data-arg="${d.id}"><h4>${esc(d.name)}</h4><p>${esc(d.blurb)}</p></button>`).join('')}</div>
       <div class="btn-row"><button class="btn primary big" data-action="found">Found the company</button>
         <button class="btn big" data-action="help">How to play</button></div>`);
   };
@@ -577,7 +597,7 @@
       ${r.bridge ? `<div class="callout warn">${esc(r.bridge)}</div>` : ''}
       ${sitLine(r.started, 'started')}${sitLine(r.ended, 'ended')}
       ${r.warnings.map((w) => `<div class="callout bad">${esc(w)}</div>`).join('')}
-      ${warnLines}${rumorLines}${obLines}
+      ${warnLines}${rumorLines}${obLines}${hwLines(r)}${peopleLines(r)}
       <div class="rep-grid">
         <div>
           <h3>Finances</h3>
@@ -695,7 +715,8 @@
     menu: () => UI.showStart(),
     closeModal: () => closeModal(),
     pickArch: (id) => { pickedArch = id; document.querySelectorAll('.card[data-action=pickArch]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
-    found: () => startGame(E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim())),
+    found: () => startGame(E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff)),
+    pickDiff: (id) => { pickedDiff = id; document.querySelectorAll('.card[data-action=pickDiff]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
     continue: () => startGame(loadSave()),
     apply: (id) => {
       const st = S.policies[id];
@@ -742,12 +763,24 @@
       }, 420);
     },
     afterReport: () => {
+      if (S.unseen) { recordUnlocks(S.unseen); S.unseen = null; }
       if (celebrations.length) return showCelebration(celebrations.shift());
       if (S.ended) UI.showEnding(S.ended);
       else if (S.pendingDilemma) UI.showDilemma();
       else closeModal();
     },
     archive: (tab) => showArchive(tab || 'all'),
+    hiring: () => showHiring(),
+    compute: () => showCompute(),
+    offer: (id) => { const r = HR.makeOffer(S, id); afterAction(r, r.ok ? (r.accepted ? `<b>${esc(r.person.name)}</b> accepted your offer.` : esc(r.text)) : null); showHiring(r.ok ? null : r.reason); if (r.ok) A.play(r.accepted ? 'chime' : 'cancel'); },
+    passCand: (id) => { S.people.feed = S.people.feed.filter((c) => c.id !== +id); save(); showHiring(); },
+    appoint: (id) => { const sel = document.getElementById('focus-' + id); const r = HR.appointManager(S, id, sel ? sel.value : null); afterAction(r); showHiring(r.ok ? null : r.reason); },
+    unappoint: (id) => { HR.removeManager(S, id); afterAction({ ok: true }); showHiring(); },
+    practice: (id) => { const r = HR.setPractice(S, id, !S.people.practices[id]); afterAction(r); showHiring(r.ok ? null : r.reason); },
+    toggleValue: (id) => { valueDraft = valueDraft.includes(id) ? valueDraft.filter((x) => x !== id) : valueDraft.concat(id).slice(-FL.MAX_VALUES); showHiring(); },
+    saveValues: () => { const r = HR.setValues(S, valueDraft); afterAction(r); showHiring(r.ok ? null : r.reason); },
+    deal: (id) => { const r = HW.acceptOffer(S, id); afterAction(r, r.ok ? 'Deal signed.' : null); showCompute(r.ok ? null : r.reason); if (r.ok) A.play('cash'); },
+    sell: (id) => { const r = HW.sellCluster(S, id); afterAction(r, r.ok ? `Sold for ${money(r.price)}.` : null); showCompute(r.ok ? null : r.reason); },
     gameMenu: () => openModal(`<h1>Menu</h1><div class="btn-row">
       <button class="btn big" data-action="help">How to play</button>
       <button class="btn big" data-action="archive">The Archive</button>
@@ -772,6 +805,147 @@
     nextDilemma: () => UI.showDilemma(),
     archiveTab: (tab) => showArchive(tab),
   };
+
+  let valueDraft = null;
+
+  /** Common post-action bookkeeping: recompute finances, save, refresh, surface unlocks. */
+  function afterAction(res, toast) {
+    S.finance = E.computeFinances(S);
+    E.updateIndicators(S);
+    S.valuation = E.valuation(S);
+    save();
+    if (res && res.ok) { recordUnlocks(res); if (S.unseen) { recordUnlocks(S.unseen); S.unseen = null; } if (toast) FX.toast(toast, 'good'); }
+    UI.renderAll();
+  }
+
+  const pay = (m) => (m < 1 ? '$' + Math.round(m * 1000) + 'K' : money(m));
+  function initials(name) { return name.split(' ').map((w) => w[0]).join('').slice(0, 2); }
+  function avatarColor(name) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h},45%,35%)`; }
+  function traitTags(p) {
+    return p.revealed.map((t) => { const d = FL.TRAITS.find((x) => x.id === t); return `<span class="ttag ${d.good ? 'good' : 'bad'}" title="${esc(d.desc)}">${esc(d.name)}</span>`; }).join('') +
+      (p.traits.length > p.revealed.length ? '<span class="ttag unk" title="Reference checks or Bar Raiser loops can reveal hidden traits">?</span>' : '');
+  }
+
+  function showHiring(err) {
+    const P = S.people, R = HR;
+    if (!valueDraft) valueDraft = P.values.slice();
+    const roleName = (id) => FL.ROLES.find((r) => r.id === id).name;
+    const feed = P.feed.map((c) => `
+      <div class="li-card">
+        <div class="li-top"><div class="avatar" style="background:${avatarColor(c.name)}">${initials(c.name)}</div>
+          <div><b>${esc(c.name)}</b><div class="li-head">${esc(R.headline(c))}</div><div class="li-meta">${c.connections}+ connections · ${c.expires - S.turn <= 1 ? '<span class="neg">deciding soon</span>' : 'open to work'}</div></div></div>
+        <div class="li-skill"><span>Skill</span><div class="pbar"><span style="width:${c.skill}%"></span></div><b>${c.skill}</b></div>
+        <div class="tag-line">${traitTags(c)}</div>
+        <div class="row"><span>Asking</span><span class="m">${pay(c.salary)}/yr</span></div>
+        <div class="row"><span>Likely to accept</span><span class="m">${Math.round(R.acceptChance(S, c) * 100)}%</span></div>
+        <div class="btn-row"><button class="btn primary" data-action="offer" data-arg="${c.id}" ${S.bandwidth < R.costs.offer || S.ended ? 'disabled' : ''}>Make offer (${R.costs.offer})</button>
+          <button class="btn" data-action="passCand" data-arg="${c.id}">Pass</button></div>
+      </div>`).join('');
+    const mgrIds = P.managers.map((m) => m.id);
+    const roster = P.roster.slice().sort((a, b) => b.seniority - a.seniority || b.skill - a.skill).map((p) => {
+      const m = P.managers.find((x) => x.id === p.id);
+      return `<div class="li-row">
+        <div class="avatar sm" style="background:${avatarColor(p.name)}">${initials(p.name)}</div>
+        <div style="flex:1;min-width:0"><b>${esc(p.name)}</b>${p.founder ? ' <span class="muted">co-founder</span>' : ''}<div class="li-head">${esc(FL.SENIORITY[p.seniority])} ${esc(roleName(p.role))} · skill ${p.skill}</div><div class="tag-line">${traitTags(p)}</div></div>
+        <div class="li-ctl">${m ? `<button class="btn" data-action="unappoint" data-arg="${p.id}" title="Stop hiring">Hiring ${esc(roleName(m.focus))}s ✕</button>`
+            : R.canAppoint(S) && p.seniority >= 1 ? `<select id="focus-${p.id}" class="sel">${FL.ROLES.map((r) => `<option value="${r.id}" ${r.id === p.role ? 'selected' : ''}>${esc(r.name)}s</option>`).join('')}</select>
+              <button class="btn" data-action="appoint" data-arg="${p.id}" ${S.bandwidth < R.costs.manager ? 'disabled' : ''}>Make hiring manager (${R.costs.manager})</button>` : ''}</div>
+      </div>`;
+    }).join('');
+    const practices = FL.PRACTICES.map((x) => `<button class="pill ${P.practices[x.id] ? 'on' : ''}" data-action="practice" data-arg="${x.id}" title="${esc(x.desc)} (Inspired by ${esc(x.inspired)})">${esc(x.name)}</button>`).join('');
+    const values = FL.CULTURE_VALUES.map((x) => `<button class="pill ${valueDraft.includes(x.id) ? 'on' : ''} ${x.uber ? 'uber' : ''}" data-action="toggleValue" data-arg="${x.id}"
+      title="${esc(Object.entries(x.fx).map(([k, d]) => `${nameOf(k)} ${d > 0 ? '+' : ''}${Math.round(d * 100)}`).join(', '))}${x.toxicity > 0 ? ' · adds toxicity' : x.toxicity < 0 ? ' · reduces toxicity' : ''}${x.note ? ' · ' + esc(x.note) : ''}">${esc(x.name)}</button>`).join('');
+    const changed = valueDraft.length !== P.values.length || valueDraft.some((v) => !P.values.includes(v));
+    const tox = P.toxicity, flow = R.toxicityFlow(S);
+    openModal(`
+      <div class="li-wrap">
+        <div class="li-brand">Linked<b>Out</b> <span class="muted">Recruiter</span></div>
+        <h2>${P.roster.length} people · ${P.managers.length} hiring manager${P.managers.length === 1 ? '' : 's'} · ${S.bandwidth} bandwidth · payroll ${money(R.payroll(S))}/q</h2>
+        ${err ? `<div class="callout bad">${esc(err)}</div>` : ''}
+        <div class="li-grid">
+          <section><h3>Candidates</h3>${feed || '<p class="note">No one in your feed this quarter.</p>'}
+            <p class="note">Early on you recruit personally: each offer costs bandwidth. Hidden red flags only show up with reference checks or Bar Raiser loops.</p></section>
+          <section><h3>Your team</h3>${roster}
+            ${!R.canAppoint(S) ? `<p class="note">Hire ${R.MANAGER_UNLOCK - P.roster.length} more to appoint hiring managers, who recruit automatically every quarter.</p>` : '<p class="note">Hiring managers recruit every quarter. Mentors hire better people; politicians hire more people, and their friends.</p>'}</section>
+          <section>
+            <h3>Hiring practices</h3><div class="pills">${practices}</div>
+            <p class="note">Each change costs ${R.costs.practice} bandwidth. Hover for details.</p>
+            <h3>Company values (pick up to ${FL.MAX_VALUES})</h3><div class="pills">${values}</div>
+            <p class="note">Outlined values are Uber's original 14 (2015). They make you faster, and three or more compound into a toxic culture.</p>
+            <div class="btn-row"><button class="btn primary" data-action="saveValues" ${!changed || S.bandwidth < R.costs.values ? 'disabled' : ''}>Adopt values (${R.costs.values})</button></div>
+            <h3>Culture toxicity</h3>
+            <div class="pbar" style="height:8px"><span style="width:${Math.round(tox * 100)}%;background:${goodColor(1 - tox * 1.6)}"></span></div>
+            <p class="note">${pct(tox)} and ${flow > 0 ? `rising about ${Math.round(flow * 100)} points a quarter` : 'falling'}. High toxicity drags morale and retention, and eventually someone writes the blog post.</p>
+          </section>
+        </div>
+        <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Done</button></div>
+      </div>`);
+    $('modalCard').classList.add('wide');
+  }
+
+  function showCompute(err) {
+    const sm = HW.summary(S), hw = S.hw;
+    const bar = (label, v, col) => `<div class="fin-row"><div>${esc(label)}<div class="bar" style="width:${Math.min(100, (v / Math.max(sm.need, sm.eff)) * 100)}%;background:${col}"></div></div><span class="m">${Math.round(v)}</span></div>`;
+    const fleet = hw.fleet.map((c) => {
+      const g = HW.genById(c.gen), age = S.turn - c.acquired;
+      return `<tr><td>${esc(g.name)}</td><td class="m">${c.pods.toFixed(1)}</td><td class="m">${age}q</td><td class="m">${Math.round(c.health * 100)}%</td>
+        <td class="m">${(HW.failRate(S, age) * 100).toFixed(1)}%</td><td class="m">${money(c.book)}</td><td class="m">${money(HW.salePrice(S, c))}</td>
+        <td><button class="btn" data-action="sell" data-arg="${c.id}">Sell</button></td></tr>`;
+    }).join('');
+    const pipe = hw.pipeline.map((p) => `<li><span>${p.pods.toFixed(1)} ${esc(HW.genById(p.gen).name)} pods${p.commitment ? ' (purchase commitment)' : ''}</span><span class="m">online ${E.quarterLabel(Math.max(p.ready, S.turn + (p.payLeft || 0)))}</span></li>`).join('');
+    const leases = hw.leases.map((l) => `<li><span>${esc(l.name)}</span><span class="m">${Math.round(l.perf)} perf · ${l.perQuarter ? money(l.perQuarter) + '/q · ' : ''}until ${E.quarterLabel(l.until)}</span></li>`).join('');
+    const offers = hw.offers.map((o) => `<div class="card" style="cursor:default"><span class="diff Normal">${esc(o.kind)}</span><h4>${esc(o.provider)}</h4><p>${esc(o.text)}</p>
+      <div class="meta">${esc(o.summary)}</div><div class="meta">Offer expires after ${E.quarterLabel(o.expires - 1)}</div>
+      <div class="btn-row"><button class="btn primary" data-action="deal" data-arg="${o.id}" ${S.bandwidth < o.bandwidth || S.ended ? 'disabled' : ''}>Sign (${o.bandwidth} bandwidth)</button></div></div>`).join('');
+    const next = FL.CHIP_GENS.find((g) => g.turn > S.turn);
+    openModal(`
+      <h1>Compute</h1>
+      <h2>Current generation: ${esc(sm.gen.name)} (${sm.gen.perf}x, ${money(sm.gen.price * HW.priceMult(S))} per pod of 1,000 chips)${next ? ` · ${esc(next.name)} (${next.perf}x) ships ${E.quarterLabel(next.turn)}` : ''}</h2>
+      ${err ? `<div class="callout bad">${esc(err)}</div>` : ''}
+      <div class="rep-grid">
+        <div>
+          <h3>Effective compute vs what the frontier needs</h3>
+          ${bar('Frontier need', sm.need, '#fbbf24')}${bar('Owned clusters', sm.owned, '#38bdf8')}${bar('Leases & deals', sm.leased, '#0ea5e9')}
+          ${bar('Cloud partnership', sm.cloud, '#7dd3fc')}${bar('Spot rentals', sm.spot, '#a5b4fc')}
+          <p class="note">You have ${Math.round(sm.ratio * 100)}% of frontier need. The need grows about 50% a year, so yesterday's cluster becomes today's minimum.</p>
+          <h3>Power</h3>
+          <div class="row"><span>Owned clusters draw</span><span class="m">${Math.round(sm.demand)} MW of ${Math.round(sm.power)} MW</span></div>
+          ${sm.utilization < 1 ? `<div class="callout bad">Power-limited: clusters are running at ${Math.round(sm.utilization * 100)}%. Fund energy deals or sign a power purchase agreement.</div>` : ''}
+          <h3>Being built</h3><ul class="rep-list">${pipe || '<li class="muted">Nothing under construction. Fund Build Own Datacenters.</li>'}</ul>
+          <h3>Leases</h3><ul class="rep-list">${leases || '<li class="muted">No active leases.</li>'}</ul>
+        </div>
+        <div>
+          <h3>Deals on the table</h3>${offers || '<p class="note">No offers right now. Providers come knocking every few quarters.</p>'}
+        </div>
+      </div>
+      <h3>Owned fleet</h3>
+      <table class="fleet"><thead><tr><th>Gen</th><th>Pods</th><th>Age</th><th>Health</th><th>Fail/q</th><th>Book value</th><th>Resale</th><th></th></tr></thead><tbody>${fleet || '<tr><td colspan="8" class="muted">You own no hardware.</td></tr>'}</tbody></table>
+      <p class="note">Failures follow a bathtub curve: new hardware has teething failures, then a stable middle age, then wears out. Infrastructure engineers on your team cut failure rates. Hardware depreciates over ${HW.lifeQuarters(S)} quarters on this difficulty, and old generations resell for much less.</p>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Done</button></div>`);
+    $('modalCard').classList.add('wide');
+  }
+
+  function hwLines(r) {
+    const h = r.hardware;
+    if (!h) return '';
+    const out = [];
+    if (h.newGen) out.push(`<div class="callout good"><b>${esc(h.newGen)} chips are shipping.</b> Every cluster you own just became relatively older.</div>`);
+    if (h.delivered > 0.5) out.push(`<div class="callout"><b>Compute online:</b> ${h.delivered.toFixed(1)} pods delivered.</div>`);
+    if (h.failed > 0.3) out.push(`<div class="callout warn"><b>Hardware failures:</b> lost ${h.failed.toFixed(1)} pods this quarter.</div>`);
+    h.expired.forEach((n) => out.push(`<div class="callout warn"><b>Lease ended:</b> ${esc(n)}.</div>`));
+    if (h.offer) out.push(`<div class="callout good"><b>New compute offer:</b> ${esc(h.offer.provider)} — ${esc(h.offer.kind)}. <a href="#" data-action="compute">Review</a></div>`);
+    return out.join('');
+  }
+  function peopleLines(r) {
+    const p = r.people;
+    if (!p) return '';
+    const out = [];
+    if (p.hired.length) out.push(`<div class="callout good"><b>Your hiring managers brought in ${p.hired.length}:</b> ${esc(p.hired.slice(0, 5).join(', '))}${p.hired.length > 5 ? '…' : ''}</div>`);
+    if (p.left.length) out.push(`<div class="callout bad"><b>Departures:</b> ${esc(p.left.join(', '))}</div>`);
+    if (p.culled.length) out.push(`<div class="callout warn"><b>Keeper test:</b> let go of ${esc(p.culled.join(', '))}</div>`);
+    if (p.leaks.length) out.push(`<div class="callout bad"><b>Leak:</b> internal documents reached the press. Someone on the team talks to journalists.</div>`);
+    return out.join('');
+  }
 
   function floatDeltas(before) {
     const svg = $('board');
