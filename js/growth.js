@@ -120,7 +120,8 @@
   G.pmf = function (state) {
     const v = state.values;
     const retention = v.adoption > 0.01 ? Math.min(1, G.share(state) / v.adoption) : 0;
-    return clamp(0.05 + 0.45 * v.quality + 0.2 * retention + 0.1 * v.brand + 0.1 * (v.trust - 0.5) + 0.1 * (state.active.viral ? 1 : 0), 0, 0.95);
+    const plays = FL.Playbook ? FL.Playbook.mod(state, 'pmf', 0) : 0;
+    return clamp(0.05 + 0.45 * v.quality + 0.2 * retention + 0.1 * v.brand + 0.1 * (v.trust - 0.5) + 0.1 * (state.active.viral ? 1 : 0) + plays, 0, 0.95);
   };
 
   /** Burn multiple: net burn per quarter / net new ARR per quarter. Null while there is no ARR growth. */

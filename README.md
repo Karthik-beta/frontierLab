@@ -46,6 +46,7 @@ into the game's advisor panel with `./frontier say`.
 | —                    | Cookie Clicker-style golden opportunities, buffs, Legacy prestige perks, joke ticker |
 | —                    | Rival moves: poach, price war, espionage, smears, pacts, licensing, acquisitions — and rivals that do it to you |
 | —                    | Startup scorecard: Blitzscaling stages, YC weekly growth bar, PMF, burn multiple, default alive |
+| —                    | Growth Playbook: commit to Blitzscaling rules or YC maxims (embrace chaos, founder mode, talk to users...) |
 
 It runs in **real time**: the clock never stops for you, decisions expire, and you never see the
 whole picture. Rivals are estimates, your own safety is an eval estimate, and every run has a hidden

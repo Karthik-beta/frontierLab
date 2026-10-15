@@ -38,6 +38,8 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Localization (Italian first)
 
 ## Done
+- [x] Apache-2.0 license with a NOTICE requiring attribution of the original project on forks
+- [x] Growth Playbook: up to 3 stances from Blitzscaling's counterintuitive rules and YC/Paul Graham maxims, each with tradeoffs (UI + `./frontier playbook`)
 - [x] Rival interactions: 7 hostile and 6 cooperative moves, relationships and grudges, hidden personas, AI rivals acting on you (poaching, suits, smears, price wars, proposals), player-vs-player relay in multiplayer
 - [x] Growth framed by startup canon: Blitzscaling stages (with coordination and culture costs), YC weekly growth bar, PMF (Sean Ellis 40%), burn multiple, default alive; YC-style objectives; verified canon artifacts and achievements
 - [x] Plague Inc-style growth: users spread region by region on a map; revenue is earned on actual users; regional bans and booms

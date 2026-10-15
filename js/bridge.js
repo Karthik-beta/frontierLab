@@ -173,6 +173,7 @@
   fleet | deals | accept <dealId> | sell <clusterId>
   campaigns | book <id> | unbook <id>   Marketing campaigns (results at quarter end)
   archive                     Your collection
+  playbook [ids]              Growth playbook: Blitzscaling rules and YC maxims (up to 3)
   rivals                      Rival labs: estimates, relationship, your read on them, moves available
   act <move> <rival>          Make a move (poachTeam, priceWar, antitrust, espionage, smear, lockout, ipSuit,
                               safetyPact, pausePact, sellCapacity, license, coalition, acquire)
@@ -348,6 +349,13 @@
         const r = FL.Rivals.act(s, args[0], args.slice(1).join(' '));
         U.refresh(r);
         return r.ok ? { ok: true, text: r.text } : fail(r.reason);
+      }
+      case 'playbook': case 'plays': {
+        if (!args.length) return { ok: true, data: { active: s.plays || [], plays: FL.PLAYS.map((p) => ({ id: p.id, school: p.school, name: p.name, desc: p.desc })) },
+          text: FL.PLAYS.map((p) => `${(s.plays || []).includes(p.id) ? '[x]' : '[ ]'} ${p.id.padEnd(16)} ${p.school.padEnd(13)} ${p.name} — ${p.desc}`).join('\n') + `\nSet with: frontier playbook id1,id2,id3 (max ${FL.MAX_PLAYS}, costs ${FL.Playbook.COST} bandwidth)` };
+        const r = FL.Playbook.set(s, args.join(' ').split(',').map((x) => x.trim()).filter(Boolean));
+        U.refresh(r);
+        return r.ok ? { ok: true, text: 'Playbook: ' + ((s.plays || []).join(', ') || 'none') } : fail(r.reason);
       }
       case 'archive': { const m = U.meta(); return { ok: true, data: m, text: `${m.artifacts.length}/${FL.ARCHIVE.length} artifacts, ${m.achievements.length}/${FL.ACHIEVEMENTS.length} achievements.` }; }
       case 'say': case 'advise': U.advisor(args.join(' ')); return { ok: true, text: 'Shown in the browser.' };

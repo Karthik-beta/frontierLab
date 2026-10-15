@@ -187,6 +187,7 @@
     for (const v of activeValues(state)) t += v.toxicity || 0;
     if (activeValues(state).filter((v) => v.uber).length >= 3) t += 0.01; // a full "Superpumped" culture compounds
     if (FL.Growth && state.growth) t += FL.Growth.stageToxicity(state); // blitzscaling: chaos grows with headcount
+    if (FL.Playbook) t += FL.Playbook.mod(state, 'toxicity', 0);
     const mult = activePractices(state).reduce((m, x) => m * (x.toxicityMult || 1), 1);
     return t > 0 ? t * mult : t;
   };
@@ -257,7 +258,7 @@
     for (const m of P.managers) {
       const mp = P.roster.find((x) => x.id === m.id);
       if (!mp) continue;
-      let vol = 1 + Math.floor(mp.skill / 45) + prs.reduce((a, x) => a + (x.volume || 0), 0);
+      let vol = 1 + Math.floor(mp.skill / 45) + prs.reduce((a, x) => a + (x.volume || 0), 0) + (FL.Playbook ? FL.Playbook.mod(state, 'managerVolume', 0) : 0);
       let quality = (mp.skill - 50) * 0.3 + prs.reduce((a, x) => a + (x.quality || 0), 0);
       for (const tr of mp.traits) { vol += traitOf(tr).managerVolume || 0; quality += traitOf(tr).managerQuality || 0; }
       m.acc = (m.acc || 0) + Math.max(0, vol) * dt;

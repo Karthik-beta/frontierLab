@@ -88,7 +88,7 @@
   /** Chance used by the launch dilemma's chance outcomes. */
   M.launchChance = function (state, opt) {
     const v = state.values;
-    if (opt.chance.launchViral) return Math.min(0.85, 0.12 + v.quality * 0.45 + v.brand * 0.2);
+    if (opt.chance.launchViral) return Math.min(0.85, 0.12 + v.quality * 0.45 + v.brand * 0.2 + (FL.Playbook ? FL.Playbook.mod(state, 'viral', 0) : 0));
     if (opt.chance.launchDemo) return Math.max(0.15, Math.min(0.9, 0.8 - Math.max(0, v.hype - v.quality) * 1.2 - (state.policies.benchmarks ? 0.1 : 0)));
     return opt.chance.p;
   };

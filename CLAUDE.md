@@ -25,7 +25,8 @@ When the user wants help playing (e.g. "help me with this quarter", "what should
    `./frontier rivals` shows each rival's estimate, your relationship and your read on them;
    `./frontier act <move> <rival>` makes a move (ask the player first). `./frontier growth`
    includes the startup scorecard: Blitzscaling stage, weekly growth vs YC's 5-7% bar, PMF,
-   burn multiple, default alive/dead.
+   burn multiple, default alive/dead. `./frontier playbook` lists the Growth Playbook stances
+   (Blitzscaling rules and YC maxims); changing it costs bandwidth, so recommend before acting.
    You get the same fog the player gets: rival capabilities are estimates, safety is an eval
    estimate, and effects are qualitative. There is no hidden "correct" build to look up — every
    run has a different hidden world. Reason from evidence and say how sure you are.

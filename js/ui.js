@@ -820,7 +820,9 @@
       save(); UI.renderAll();
     },
     archive: (tab) => showArchive(tab || 'all'),
-    growth: () => showGrowth(),
+    growth: () => { playDraft = null; showGrowth(); },
+    togglePlay: (id) => { playDraft = playDraft.includes(id) ? playDraft.filter((x) => x !== id) : playDraft.concat(id).slice(-FL.MAX_PLAYS); showGrowth(); },
+    savePlays: () => { const r = FL.Playbook.set(S, playDraft); afterAction(r, r.ok ? 'Playbook committed.' : null); playDraft = null; showGrowth(); if (!r.ok) FX.toast(esc(r.reason), 'bad'); },
     rivals: (id) => showRivals(id),
     rivalAct: (arg) => {
       const [aid, rid] = String(arg).split('|');
@@ -998,6 +1000,19 @@
         <p class="note">Blitzscaling means choosing speed over efficiency when you can't be sure. Every stage brings new coordination costs, unless your executive team grows with you, and more cultural chaos, unless HR does.</p></div></div>`;
   }
 
+  let playDraft = null;
+  function playbookHTML() {
+    if (!playDraft) playDraft = (S.plays || []).slice();
+    const cur = S.plays || [];
+    const changed = playDraft.length !== cur.length || playDraft.some((x) => !cur.includes(x));
+    const group = (school) => FL.PLAYS.filter((p) => p.school === school).map((p) => `<button class="pill ${playDraft.includes(p.id) ? 'on' : ''}" data-action="togglePlay" data-arg="${p.id}"
+      title="${esc(p.desc)}${p.earlyOnly ? ' (best while small)' : ''}${p.lateOnly ? ' (pays off from City stage)' : ''}">${esc(p.name)}</button>`).join('');
+    return `<h3>Growth playbook <span class="muted" style="text-transform:none;letter-spacing:0">· choose up to ${FL.MAX_PLAYS} · hover for tradeoffs</span></h3>
+      <p class="note">Blitzscaling (Hoffman & Yeh)</p><div class="pills">${group('Blitzscaling')}</div>
+      <p class="note" style="margin-top:8px">Y Combinator / Paul Graham</p><div class="pills">${group('Y Combinator')}</div>
+      <div class="btn-row"><button class="btn primary" data-action="savePlays" ${!changed || S.bandwidth < FL.Playbook.COST ? 'disabled' : ''}>Commit playbook (${FL.Playbook.COST} bandwidth)</button></div>`;
+  }
+
   function showGrowth() {
     const g = FL.Growth.summary(S);
     const maxPop = Math.max(...FL.REGIONS.map((r) => r.pop));
@@ -1018,6 +1033,7 @@
       <h2>${fmtUsers(g.users)} users · ${fmtUsers(g.dau)} daily actives · ${Math.round(g.share * 100)}% of the online world${g.growthQoQ != null ? ` · ${g.growthQoQ >= 0 ? '+' : ''}${Math.round(g.growthQoQ * 100)}% this quarter` : ''}</h2>
       <svg class="map" viewBox="0 0 1000 480">${links.join('')}${nodes}</svg>
       ${scorecardHTML()}
+      ${playbookHTML()}
       <div class="rep-grid"><div><h3>Users over time</h3>${spark(series, 420, 70, { min: 0, color: '#22d3ee' })}
         <p class="note">Users spread like an outbreak: fast where your product appeals and neighbours already use it, slow where price, regulation or access hold it back. Revenue is earned on these users, not on appeal.</p></div>
       <div><h3>What moves it</h3><ul class="rep-list">

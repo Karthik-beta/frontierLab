@@ -284,6 +284,8 @@
     for (const s of FL.SITUATIONS) {
       if (state.active[s.id] && s.special && s.special.cost) items.push({ label: s.name, amount: s.special.cost * (1 + 0.03 * state.turn), color: '#ef4444' });
     }
+    const costMult = FL.Playbook ? FL.Playbook.mod(state, 'costs', 1) : 1;
+    if (costMult !== 1) items.forEach((it) => (it.amount *= costMult));
     const costs = items.reduce((a, b) => a + b.amount, 0);
     return { revenue, costs, net: revenue - costs, items };
   };
@@ -322,7 +324,7 @@
       state.shocks.push({ to: 'hype', amt: -0.08, turns: 4, left: 4 });
     } else {
       ok = true;
-      raised = val * (0.14 + 0.06 * conf) * E.diff(state).fundingMult;
+      raised = val * (0.14 + 0.06 * conf) * E.diff(state).fundingMult * (FL.Playbook ? FL.Playbook.mod(state, 'raise', 1) : 1);
       text = `${name} closed: ${E.fmtMoney(raised)} at a ${E.fmtMoney(val)} valuation.`;
     }
     state.cash += raised;
@@ -407,7 +409,8 @@
       if (sp && sp.bandwidth) inc += Math.round(sp.bandwidth * (0.2 + 0.8 * p.level));
     }
     for (const s of FL.SITUATIONS) if (state.active[s.id] && s.special && s.special.bandwidth) inc += s.special.bandwidth;
-    if (FL.Growth && state.growth) inc += FL.Growth.stageBandwidth(state);
+    if (FL.Growth && state.growth && !(FL.Playbook && FL.Playbook.mod(state, 'stageBandwidth', false))) inc += FL.Growth.stageBandwidth(state);
+    if (FL.Playbook) inc += FL.Playbook.mod(state, 'bandwidth', 0);
     return Math.max(1, inc);
   };
 
