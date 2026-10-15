@@ -25,6 +25,7 @@ function validTrigger(k) {
   if ((m = k.match(/^ending:(\w+)$/))) return endings.has(m[1]);
   if ((m = k.match(/^(cap|turn|team):\d+$/))) return true;
   if ((m = k.match(/^dilemma:(.+?):(\d):(win|lose)$/))) return dilIds.has(m[1]);
+  if ((m = k.match(/^campaign:(\w+)(:best|:worst|:broke)?$/))) return FL.CAMPAIGNS.some((c) => c.id === m[1]);
   if ((m = k.match(/^practice:(\w+)$/))) return FL.PRACTICES.some((p) => p.id === m[1]);
   if ((m = k.match(/^hire:(\w+)$/))) return ['legend', 'jerk'].includes(m[1]) || FL.ROLES.some((r) => r.id === m[1]);
   if ((m = k.match(/^deal:(\w+)$/))) return m[1] === 'duringShortage' || FL.COMPUTE_OFFERS.some((o) => o.id === m[1]);

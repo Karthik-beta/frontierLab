@@ -10,6 +10,7 @@ SRC = ROOT / 'tools' / 'research' / 'artifacts_research.json'
 SRC2 = ROOT / 'tools' / 'research' / 'research_round2.json'
 OUT = ROOT / 'js' / 'data' / 'archive.js'
 OUT_ACH = ROOT / 'js' / 'data' / 'achievements.js'
+SRC3 = ROOT / 'tools' / 'research' / 'research_marketing.json'
 
 # artifact id -> (trigger key or list, rarity). Unlisted ids are 'common' (random quarterly epigraphs).
 TRIGGERS = {
@@ -163,6 +164,52 @@ ACH = {
     'it-looks-like': 'policy:agents:max',
 }
 
+TRIGGERS3 = {
+    'openai-first-super-bowl-intelligence-age': ('campaign:superBowl', 'rare'),
+    'anthropic-super-bowl-ads-not-to-claude': ('campaign:superBowl:best', 'rare'),
+    'altman-calls-anthropic-ads-dishonest': ('campaign:superBowl:best', 'rare'),
+    'openai-codex-super-bowl-just-build-things': ('campaign:superBowl', 'rare'),
+    'google-dear-sydney-pulled': ('campaign:aiAd:worst', 'rare'),
+    'artisan-stop-hiring-humans': ('campaign:billboards', 'rare'),
+    'friend-subway-campaign-vandalized': ('campaign:subway:worst', 'rare'),
+    'chatgpt-low-key-research-preview': ('dilemma:modelLaunch:0:win', 'legendary'),
+    'altman-her-tweet-sky-voice': ('policy:ceoTour', 'rare'),
+    'apple-1984-macintosh': ('campaign:superBowl:best', 'rare'),
+    'apple-think-different': ('policy:marketing:max', 'rare'),
+    'apple-intelligence-available-now-nad': ('policy:marketing', 'rare'),
+    'apple-siri-delay-lawsuit': ('dilemma:recallFeature:0', 'rare'),
+    'apple-crush-ad-apology': ('campaign:stunt:worst', 'rare'),
+    'microsoft-365-copilot-app-rename': ('policy:marketing', 'rare'),
+    'clippy-office-assistant': ('policy:agents:max', 'rare'),
+    'nadella-made-them-dance': ('situation:frontierLeader', 'rare'),
+    'google-io-ai-121-times': ('dilemma:modelLaunch:1', 'rare'),
+    'gemini-hands-on-video-staged': ('dilemma:modelLaunch:1:lose', 'rare'),
+    'meta-celebrity-ai-personas': ('policy:creators', 'rare'),
+    'devin-first-ai-software-engineer': ('policy:coding:max', 'rare'),
+    'llama4-lmarena-experimental': ('dilemma:modelLaunch:3', 'rare'),
+    'gpt5-mega-chart-screwup': ('dilemma:modelLaunch:3', 'rare'),
+    'ghibli-gpus-melting': ('pitfall:hugOfDeath', 'rare'),
+    'sora-app-invite-only': ('campaign:waitlist', 'rare'),
+    'superhuman-waitlist': ('dilemma:modelLaunch:2', 'rare'),
+    'clubhouse-invite-only-peak': ('campaign:waitlist:worst', 'rare'),
+    'slack-preview-8000': ('campaign:waitlist:best', 'rare'),
+    'dropbox-referral-program': ('campaign:referral', 'rare'),
+    'hotmail-ps-i-love-you': ('campaign:referral:best', 'rare'),
+    'tesla-zero-advertising': ('policy:ceoTour:max', 'rare'),
+    'old-spice-man-your-man': ('campaign:stunt:best', 'rare'),
+    'dotcom-super-bowl-2000': ('campaign:superBowl:broke', 'legendary'),
+    'coca-cola-ai-holiday-ad': ('campaign:aiAd', 'rare'),
+    'toys-r-us-sora-ad': ('campaign:aiAd:worst', 'rare'),
+}
+SKIP3 = {'bing-sydney-roose', 'google-bard-jwst-error'}  # duplicates of round-one cards
+ACH3 = {
+    'dawn-of-the-dots': 'campaign:superBowl', 'a-time-and-a-place': 'campaign:superBowl:best', 'feeding-the-troll': 'campaign:superBowl:worst',
+    'low-key': 'dilemma:modelLaunch:0:win', 'hundred-billion-dollar-typo': 'dilemma:modelLaunch:1:lose', 'ai-ai-ai': 'dilemma:modelLaunch:1',
+    'latency-reduced': 'pitfall:demoDisaster', 'experimental-variant': 'dilemma:modelLaunch:3', 'chart-crime': 'policy:benchmarks:max',
+    'gpus-melting': 'pitfall:hugOfDeath', 'picture-of-the-billboard': 'campaign:subway:worst', 'we-missed-the-mark': 'campaign:aiAd:worst',
+    'ps-i-love-you': 'campaign:referral', 'sock-puppet': 'campaign:superBowl:broke',
+}
+
 KEEP = ['id', 'year', 'date', 'title', 'quote', 'speaker', 'paraphrase', 'summary', 'lesson', 'tone', 'category', 'source']
 
 
@@ -192,7 +239,23 @@ def main():
         rec['rarity'] = rarity
         out.append(rec)
 
+    r3 = json.loads(SRC3.read_text())
+    all_ids = {r['id'] for r in out}
+    missing4 = sorted(set(TRIGGERS3) - {a['id'] for a in r3['artifacts']})
+    assert not missing4, f'marketing mapping references unknown ids: {missing4}'
+    for a in r3['artifacts']:
+        if a['id'] in SKIP3:
+            continue
+        assert a['id'] not in all_ids, f'duplicate artifact id {a["id"]}'
+        trig, rarity = TRIGGERS3.get(a['id'], (None, 'common'))
+        rec = {k: a.get(k) for k in KEEP}
+        rec['trigger'] = trig if trig is not None else 'epigraph'
+        rec['rarity'] = rarity
+        out.append(rec)
+
     ach_src = {a['id']: a for a in r2['achievements']}
+    ach_src.update({a['id']: a for a in r3['achievements']})
+    ACH.update(ACH3)
     missing3 = sorted(set(ACH) - set(ach_src))
     assert not missing3, f'achievement mapping references unknown ids: {missing3}'
     achs = []

@@ -120,6 +120,7 @@
     ob.done.forEach((o) => L.push(`Objective complete: ${o.text}`));
     ob.failed.forEach((o) => L.push(`Objective missed: ${o.text}`));
     (r.news || []).forEach((n) => L.push('Rival news: ' + n));
+    (r.campaigns || []).forEach((c) => L.push(`Campaign ${c.name}: ${c.label}`));
     if (r.hardware && r.hardware.newGen) L.push(`${r.hardware.newGen} chips are now shipping.`);
     if (r.people && r.people.left.length) L.push('Departures: ' + r.people.left.join(', '));
     (r.deltas || []).slice(0, 6).forEach((d) => L.push(`  ${d.name}: ${Math.round(d.from * 100)} → ${Math.round(d.to * 100)}`));
@@ -153,6 +154,7 @@
   practice <id> on|off        Toggle a hiring practice
   values <id,id,...>          Set company values (max 4)
   fleet | deals | accept <dealId> | sell <clusterId>
+  campaigns | book <id> | unbook <id>   Marketing campaigns (results at quarter end)
   archive                     Your collection
   say <message>               Show an advisor note in the browser
   new <origin> [difficulty] [name]   Start a new game`;
@@ -249,6 +251,13 @@
       case 'deals': return { ok: true, data: s.hw.offers, text: s.hw.offers.map((o) => `${o.id} — ${o.provider}: ${o.kind}. ${o.summary}. ${o.text}`).join('\n') || 'No deals on the table.' };
       case 'accept': { const r = HW.acceptOffer(s, args[0]); U.refresh(r); return r.ok ? { ok: true, text: 'Deal signed.' } : fail(r.reason); }
       case 'sell': { const r = HW.sellCluster(s, args[0]); U.refresh(r); return r.ok ? { ok: true, text: `Sold for ${money(r.price)}.` } : fail(r.reason); }
+      case 'campaigns': case 'marketing': {
+        const list = FL.Marketing.available(s);
+        return { ok: true, data: list.map((c) => ({ id: c.id, name: c.name, cost: c.price, bandwidth: c.bandwidth, blocker: c.blocker, booked: s.mkt.booked.includes(c.id) })),
+          text: `Brand ${pct(s.values.brand)} · Hype ${pct(s.values.hype)}\n` + list.map((c) => `${s.mkt.booked.includes(c.id) ? '[booked]' : c.blocker ? '[--]    ' : '[ ]     '} ${c.id.padEnd(12)} ${c.name.padEnd(34)} ${money(c.price)} · ${c.bandwidth} bw${c.blocker && !s.mkt.booked.includes(c.id) ? ' · ' + c.blocker : ''}`).join('\n') };
+      }
+      case 'book': { const r = FL.Marketing.book(s, args[0]); U.refresh(r); return r.ok ? { ok: true, text: 'Booked. Results arrive at quarter end.' } : fail(r.reason); }
+      case 'unbook': { const r = FL.Marketing.unbook(s, args[0]); U.refresh(r); return r.ok ? { ok: true, text: 'Booking cancelled and refunded.' } : fail(r.reason); }
       case 'archive': { const m = U.meta(); return { ok: true, data: m, text: `${m.artifacts.length}/${FL.ARCHIVE.length} artifacts, ${m.achievements.length}/${FL.ACHIEVEMENTS.length} achievements.` }; }
       case 'say': case 'advise': U.advisor(args.join(' ')); return { ok: true, text: 'Shown in the browser.' };
       default: return fail(`Unknown command "${cmd}". Try: frontier help`);

@@ -151,6 +151,7 @@
     state.ownership = 100;
     if (FL.Hardware) FL.Hardware.init(state, arch);
     if (FL.Hiring) FL.Hiring.init(state, arch);
+    if (FL.Marketing) FL.Marketing.init(state);
 
     // Warm start: settle the network so turn 1 isn't a cold transient.
     state.finance = E.computeFinances(state);
@@ -472,6 +473,7 @@
     if (o.special === 'reinstate') state.flags.reinstated = true;
     if (o.special === 'cultureReset' && FL.Hiring) FL.Hiring.cultureReset(state);
     if (o.dropPractice && state.people) state.people.practices[o.dropPractice] = false;
+    if (o.meter) state.meters[o.meter[0]] = (state.meters[o.meter[0]] || 0) + o.meter[1];
   }
 
   /** Cash amounts in late-game events scale with the size of the company. */
@@ -495,7 +497,8 @@
     if (opt.chance) {
       let p = opt.chance.p;
       if (opt.chance.useStakeholder) p = clamp(0.5 + 0.5 * state.happiness[opt.chance.useStakeholder], 0.05, 0.95);
-      const bad = E.rand(state) < (opt.chance.useStakeholder ? 1 - p : p);
+      let bad = E.rand(state) < (opt.chance.useStakeholder ? 1 - p : p);
+      if ((opt.chance.launchViral || opt.chance.launchDemo) && FL.Marketing) bad = E.rand(state) >= FL.Marketing.launchChance(state, opt);
       const out = bad ? opt.chance.lose : opt.chance.win;
       if (out) { applyOutcome(state, out); text = out.text; }
       state._outcome = bad ? 'lose' : 'win';
@@ -571,6 +574,7 @@
     report.finance = { ...state.finance };
     if (FL.Hardware) FL.Hardware.update(state, report);
     if (FL.Hiring) FL.Hiring.update(state, report);
+    if (FL.Marketing) FL.Marketing.update(state, report);
 
     const capRes = E.advanceCapability(state);
     report.capGain = capRes.gain;

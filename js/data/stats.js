@@ -32,6 +32,8 @@
       desc: 'How hard it is to steal your weights. Matters more as capability rises.' },
     { id: 'legal', name: 'Legal Exposure', base: 0.05, good: false,
       desc: 'Copyright, privacy and liability risk built up from how you got your data.' },
+    { id: 'brand', name: 'Brand Awareness', base: 0.05, good: true,
+      desc: 'How many people know who you are and what you stand for. Slow to build, slow to fade — unlike hype.' },
     { id: 'openness', name: 'Research Openness', base: 0.15, good: true,
       desc: 'How much you share. Researchers love it; security teams and some investors do not.' },
   ];
@@ -89,6 +91,13 @@
     { from: 'legal', to: 'regHeat', k: 0.10, lag: 3 },
 
     { from: 'adoption', to: 'data', k: 0.30, curve: 'sqrt', lag: 3 },
+
+    { from: 'brand', to: 'adoption', k: 0.12, lag: 3 },
+    { from: 'brand', to: 'hype', k: 0.05, lag: 2 },
+    { from: 'brand', to: 'monetization', k: 0.05, lag: 4 },
+    { from: 'adoption', to: 'brand', k: 0.18, curve: 'sqrt', lag: 4 },
+    { from: 'trust', to: 'brand', k: 0.05, curve: 'ctr', lag: 4 },
+    { from: 'quality', to: 'brand', k: 0.06, lag: 4 },
 
     { from: 'openness', to: 'security', k: -0.08, lag: 2 },
     { from: 'talent', to: 'security', k: 0.05, lag: 2 },

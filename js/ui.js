@@ -30,13 +30,13 @@
     comp: 'PAY', tenders: 'TO', poach: 'PO', culture: 'MC', crunch: 'CR', hiring: 'HI',
     consumerApp: 'APP', freeTier: 'FT', api: 'API', pricing: 'PR', entSales: 'ENT', coding: 'COD', ads: 'ADS', moderation: 'CF',
     redteam: 'RT', rsp: 'RSP', audits: 'AU', secProgram: 'SEC', lobbying: 'LOB', defense: 'DEF', licensing: 'LIC', scraping: 'WS',
-    marketing: 'BM', ceoTour: 'CEO', nonprofit: 'NP', benchmarks: 'BX', execTeam: 'EX',
+    marketing: 'BC', ceoTour: 'CEO', nonprofit: 'NP', benchmarks: 'BX', execTeam: 'EX', devRel: 'DEV', creators: 'CRE', prTeam: 'COM', community: 'CMY',
     board: 'BD', investors: 'VC', researchers: 'RS', safetyCommunity: 'SC', enterprise: 'EC', consumers: 'CU', regulators: 'RG', openSource: 'OS', media: 'MD', partner: 'BT',
     talentExodus: 'TE', gpuCrunch: 'GS', probe: 'INV', injunction: 'INJ', lawsuit: 'LAW', jailbreak: 'JB', weightsLeak: 'WL', aiPanic: 'AP',
     misuse: 'MIS', bubble: 'BUB', viral: 'VIR', frontierLeader: '#1', missionCulture: 'MDC',
   };
   const STAT_ORDER = ['velocity', 'compute', 'talent', 'morale', 'data', 'openness', 'security', 'safety', 'trust', 'regHeat', 'legal',
-    'hype', 'quality', 'adoption', 'monetization', 'revGrowth', 'runway', 'lead'];
+    'hype', 'brand', 'quality', 'adoption', 'monetization', 'revGrowth', 'runway', 'lead'];
 
   // ── helpers ──────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
@@ -264,7 +264,8 @@
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
-      <button class="btn" data-action="hiring">Recruiting${S.people && S.people.feed.length ? ` <b>${S.people.feed.length}</b>` : ''}</button>
+      <button class="btn" data-action="marketingMenu">Marketing${S.mkt && S.mkt.booked.length ? ` <b class="pos">${S.mkt.booked.length}</b>` : ''}</button>
+      <button class="btn" data-action="hiring">People${S.people && S.people.feed.length ? ` <b>${S.people.feed.length}</b>` : ''}</button>
       <button class="btn" data-action="compute">Compute${S.hw && S.hw.offers.length ? ` <b class="pos">${S.hw.offers.length} deal${S.hw.offers.length > 1 ? 's' : ''}</b>` : ''}</button>
       <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b></button>
       <button class="btn" data-action="gameMenu">Menu</button>
@@ -603,7 +604,7 @@
       ${r.bridge ? `<div class="callout warn">${esc(r.bridge)}</div>` : ''}
       ${sitLine(r.started, 'started')}${sitLine(r.ended, 'ended')}
       ${r.warnings.map((w) => `<div class="callout bad">${esc(w)}</div>`).join('')}
-      ${warnLines}${rumorLines}${obLines}${hwLines(r)}${peopleLines(r)}
+      ${campaignLines(r)}${warnLines}${rumorLines}${obLines}${hwLines(r)}${peopleLines(r)}
       <div class="rep-grid">
         <div>
           <h3>Finances</h3>
@@ -655,7 +656,7 @@
     A.play(pit ? 'crisis' : 'decision');
     if (pit) { FX.shake($('modalCard'), 6, 380); FX.flash('#ef4444'); }
     openModal(`
-      <h2>${pit ? `Pitfall · ${pit.horizon}-term · ${esc(pit.name)}` : 'Decision required'} · ${E.quarterLabel(S.turn)}</h2>
+      <h2>${pit ? `Pitfall · ${pit.horizon}-term · ${esc(pit.name)}` : d.launch ? `${esc(S.company)} ${esc(S.lastModel || '')} is ready` : 'Decision required'} · ${E.quarterLabel(S.turn)}</h2>
       <h1>${esc(d.title)}</h1>
       <p class="lede">${esc(d.text)}</p>
       <div class="cards">${d.options.map((o, i) => `
@@ -779,6 +780,9 @@
     },
     archive: (tab) => showArchive(tab || 'all'),
     hiring: () => showHiring(),
+    marketingMenu: () => showMarketing(),
+    book: (id) => { const r = FL.Marketing.book(S, id); afterAction(r, r.ok ? 'Campaign booked. Results at quarter end.' : null); showMarketing(r.ok ? null : r.reason); if (r.ok) A.play('enact'); },
+    unbook: (id) => { const r = FL.Marketing.unbook(S, id); afterAction(r); showMarketing(r.ok ? null : r.reason); },
     compute: () => showCompute(),
     offer: (id) => { const r = HR.makeOffer(S, id); afterAction(r, r.ok ? (r.accepted ? `<b>${esc(r.person.name)}</b> accepted your offer.` : esc(r.text)) : null); showHiring(r.ok ? null : r.reason); if (r.ok) A.play(r.accepted ? 'chime' : 'cancel'); return r; },
     passCand: (id) => { S.people.feed = S.people.feed.filter((c) => c.id !== +id); save(); showHiring(); },
@@ -934,6 +938,33 @@
       <p class="note">Failures follow a bathtub curve: new hardware has teething failures, then a stable middle age, then wears out. Infrastructure engineers on your team cut failure rates. Hardware depreciates over ${HW.lifeQuarters(S)} quarters on this difficulty, and old generations resell for much less.</p>
       <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Done</button></div>`);
     $('modalCard').classList.add('wide');
+  }
+
+  function showMarketing(err) {
+    const list = FL.Marketing.available(S);
+    const chan = FL.POLICIES.filter((p) => p.cat === 'marketing').map((p) => `<div class="eff" data-action="inspect" data-arg="${p.id}"><span>${esc(p.name)}</span>
+      <span class="muted">${S.policies[p.id] ? 'active ' + pct(S.policies[p.id].level) : 'not enacted'}</span><span class="num">${S.policies[p.id] ? money(E.policyCost(S, p.id)) : ''}</span></div>`).join('');
+    const cards = list.map((c) => {
+      const booked = S.mkt.booked.includes(c.id);
+      return `<div class="card" style="cursor:default"><h4>${esc(c.name)}</h4><p>${esc(c.desc)}</p>
+        <div class="meta">${money(c.price)} · ${c.bandwidth} bandwidth · then ${c.cooldown}q cooldown${c.onlyQ ? ` · Q${c.onlyQ} only` : ''}</div>
+        <div class="meta">Outcomes: ${c.outcomes.map((o) => Math.round(o.p * 100) + '%').join(' / ')} (better products and brands tilt the odds)</div>
+        <div class="btn-row">${booked ? `<button class="btn" data-action="unbook" data-arg="${c.id}">Cancel booking</button><span class="pos">Booked</span>`
+          : `<button class="btn primary" data-action="book" data-arg="${c.id}" ${c.blocker || S.ended ? 'disabled' : ''}>Book</button>${c.blocker ? `<span class="muted">${esc(c.blocker)}</span>` : ''}`}</div></div>`;
+    }).join('');
+    const hist = S.mkt.history.slice(-5).reverse().map((h) => `<li><span>${esc(h.name)}: ${esc(h.label)}</span><span class="m muted">${E.quarterLabel(h.turn)}</span></li>`).join('');
+    openModal(`<h1>Marketing</h1>
+      <h2>Brand awareness ${pct(S.values.brand)} · Hype ${pct(S.values.hype)} · Trust ${pct(S.values.trust)} · ${S.bandwidth} bandwidth</h2>
+      ${err ? `<div class="callout bad">${esc(err)}</div>` : ''}
+      <p class="note">Hype is this quarter's buzz; brand is what lasts. Campaigns run once and report results at the end of the quarter. Each new model also gets a launch-day decision.</p>
+      <div class="rep-grid"><div><h3>Always-on channels</h3>${chan}${hist ? `<h3>Recent campaigns</h3><ul class="rep-list">${hist}</ul>` : ''}</div>
+      <div><h3>Campaigns</h3><div class="cards" style="grid-template-columns:1fr">${cards}</div></div></div>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Done</button></div>`);
+    $('modalCard').classList.add('wide');
+  }
+
+  function campaignLines(r) {
+    return (r.campaigns || []).map((c) => `<div class="callout ${c.best ? 'good' : c.worst ? 'bad' : ''}"><b>Campaign — ${esc(c.name)}:</b> ${esc(c.label)} <span class="muted">(~${c.reach}M people reached)</span></div>`).join('');
   }
 
   function hwLines(r) {

@@ -119,6 +119,7 @@
         state.milestones[key] = state.turn;
         state.lastModel = g.name;
         report.milestones.push({ kind: 'model', name: g.name, at: g.at, blurb: g.blurb });
+        if (FL.Marketing && state.cap < E.AGI) FL.Marketing.onModelShipped(state);
         S.fireTrigger(state, 'model:' + g.name, report);
         S.fireTrigger(state, 'cap:' + g.at, report);
       }
