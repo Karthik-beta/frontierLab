@@ -17,6 +17,11 @@ When the user wants help playing (e.g. "help me with this quarter", "what should
    The game runs in **real time**: decisions in the inbox expire to their default, and the clock
    keeps running while you think. `./frontier wait <weeks>` lets time pass; `./frontier speed <x>`
    changes pace (0 pauses, single-player only).
+   For history and analysis, use the logs: `./frontier log [n] [type]` (everything observable that
+   happened, including the player's own actions and decisions), `./frontier metrics [weeks]`
+   (weekly series; `--json` adds rival estimates), `./frontier world`, `./frontier growth`,
+   `./frontier buffs`, and `./frontier export --json` for one complete JSON dump. Golden
+   opportunities (`./frontier opps`, `./frontier claim <#id>`) vanish within a few game weeks.
    You get the same fog the player gets: rival capabilities are estimates, safety is an eval
    estimate, and effects are qualitative. There is no hidden "correct" build to look up — every
    run has a different hidden world. Reason from evidence and say how sure you are.

@@ -6,12 +6,13 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Post the launch drafts in docs/launch/ (needs the owner; not automated)
 - [ ] Set the repo's social preview image to assets/social-preview.png (GitHub Settings → General; no API)
 
-## Next: Plague Inc-style world layer
-- [ ] World map: adoption spreads region by region (US, EU, China, India, Gulf, LatAm, Africa, SEA) with different appetites
-- [ ] Regions react on their own: probes, bans, AI acts (like countries closing borders), sovereign AI programs
+## Next: deepen the world layer
 - [ ] A global "treaty" progress bar, like Plague Inc's cure: if it completes, frontier scaling is frozen
-- [ ] Clickable opportunity bubbles on the map (bandwidth, intel, talent) that expire if ignored
-- [ ] Map-based fog: what each region knows about you and your rivals
+- [ ] Regions react on their own as your users grow (local probes, bans, sovereign AI programs), not just via world events
+- [ ] Opportunity bubbles that appear on the growth map, tied to regions
+- [ ] Regional fog: what each region knows about you and your rivals
+- [ ] Cookie Clicker-style "buildings": named, levelled product lines with exponential cost/benefit curves
+- [ ] Seasonal events (Super Bowl season, NeurIPS season, earnings season)
 
 ## Next (multiplayer)
 - [ ] Player-to-player interactions: poach staff, bid on the same compute deals, targeted leaks, alliances
@@ -37,6 +38,11 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Localization (Italian first)
 
 ## Done
+- [x] Plague Inc-style growth: users spread region by region on a map; revenue is earned on actual users; regional bans and booms
+- [x] World events that help or hurt everyone, labs matching a condition, or random subsets (multiplayer: host rolls, each lab rolls its own subset coin)
+- [x] Cookie Clicker lessons: golden opportunities (incl. risky "wrath" ones), timed buffs, Legacy prestige perks, satirical evolving ticker, user milestones
+- [x] LLM-ready logs: fog-safe journal of everything observable, weekly metrics, export (`./frontier log / metrics / export`)
+- [x] Layout: dock under the wheel for inbox, live feed and newspaper (no more overlap)
 - [x] True real time: weekly ticks, no turns, decision inbox with deadlines and defaults, speed control, live events and newspaper feed
 - [x] Fog of war: rival estimates from releases, leaks and intel; safety as an eval estimate; trust as a poll; qualitative effects with confidence; Competitive Intelligence policy
 - [x] Hidden worlds: randomized effect strengths and 2-3 secret traits per run, with unreliable analyst notes; revealed at the end

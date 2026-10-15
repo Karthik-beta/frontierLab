@@ -746,6 +746,7 @@
     if (FL.Systems) FL.Systems.quarter(state, report, before);
     report.dilemma = state.pendingDilemma;
     state.newspapers = (state.newspapers || []).concat([report]).slice(-8);
+    E._lastPaper = report.headline || {};
     state.qr = newQuarterReport(state);
     E.emit(state, { type: 'newspaper', turn: report.turn });
     return report;
@@ -781,6 +782,19 @@
       case 'claimed': return `Claimed ${ev.name}: ${ev.text}`;
       case 'buff': return `Effect started: ${ev.name} (${ev.weeks} weeks)`;
       case 'users': return `Reached ${ev.text}`;
+      case 'newspaper': { const n = (FL.Engine._lastPaper || {}); return `Quarterly newspaper printed${n.head ? ': "' + n.head + '"' : ''}`; }
+      case 'newGen': return `New chip generation shipping: ${ev.name}`;
+      case 'hired': return `Hired ${ev.name}${ev.headline ? ', ' + ev.headline : ''}`;
+      case 'left': return `${ev.name} left (${ev.headline})`;
+      case 'campaign': return `Campaign ${ev.name}: ${ev.label}`;
+      case 'objective': return `Objective ${ev.done ? 'completed' : 'missed'}: ${ev.text}`;
+      case 'intel': return `New read on ${ev.rival} (${ev.source})`;
+      case 'note': return `Analyst note (unverified): ${ev.text}`;
+      case 'era': return `New era: ${ev.era}`;
+      case 'leak': return 'Internal documents leaked to the press';
+      case 'offer': return `Compute deal offered: ${ev.provider} — ${ev.kind}`;
+      case 'leaseEnded': return `Lease ended: ${ev.name}`;
+      case 'paused': return 'Responsible Scaling Policy slowed scaling: capability outran safety';
       default: return ev.text || ev.name || ev.type;
     }
   };

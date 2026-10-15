@@ -8,7 +8,7 @@
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const strength = (s, id) => (s.policies[id] ? 0.2 + 0.8 * s.policies[id].level : 0);
   const DAU_RATIO = 0.35;
-  const SPREAD = 2.6;   // logistic spread rate per quarter
+  const SPREAD = 6;     // logistic spread rate per quarter
   const CHURN = 1.4;    // pull-back rate per quarter when users exceed appeal
 
   G.init = function (state) {

@@ -70,3 +70,15 @@ splash quotes) uses `Math.random`.
 
 `localStorage['frontierlab.save.v1']` holds the run. `localStorage['frontierlab.meta.v1']` holds the
 cross-run collection (artifacts, achievements). Audio prefs are in `frontierlab.audio`.
+
+## Growth, chance and memory
+
+- `js/growth.js`: per-region user shares grow logistically toward your appeal (the Adoption stat), scaled
+  by regional appetite, access, price sensitivity and regulation, and seeded by brand and neighbouring
+  regions. Revenue = market × user share × monetization.
+- `js/events.js`: world events (`js/data/events.js`) with scopes `all`, `cond` or `random`. Each lab
+  rolls its own coin for subsets, so multiplayer is fair and reproducible. Golden opportunities expire in
+  three game weeks, and buffs feed in through `E.registerInput('buffs')` and `Events.mult(key)`.
+- `js/legacy.js`: Legacy points from finished single-player runs buy permanent perks (`js/data/legacy.js`).
+- Journal and metrics (`E.journal`, `E.recordMetrics`): every emitted event and player action is logged
+  in fog-safe form, with weekly observable metrics. The CLI exposes both for an assisting LLM.

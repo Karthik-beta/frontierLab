@@ -271,6 +271,7 @@
       <div class="kpi"><span class="k">Cash</span><span class="v ${S.cash < 0 ? 'neg' : ''}">${money(S.cash)}</span></div>
       <div class="kpi"><span class="k">Net / quarter</span><span class="v ${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${money(net)}</span></div>
       <div class="kpi"><span class="k">Runway</span><span class="v ${rq < toRound + 1 ? 'neg' : rq < toRound + 3 ? 'warn' : ''}">${rq === Infinity ? 'Profitable' : rq.toFixed(1) + ' q'}</span></div>
+      <div class="kpi click" data-action="growth" title="Open the growth map"><span class="k">Users</span><span class="v">${usersLabel()}</span></div>
       <div class="kpi" title="Next funding round ${toRound <= 0 ? 'this quarter' : 'in ' + toRound + ' quarters'}"><span class="k">Valuation · round ${toRound <= 0 ? 'now' : 'in ' + toRound + 'q'}</span><span class="v">${money(S.valuation)}</span></div>
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${Math.floor(S.bandwidth)} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
@@ -283,6 +284,13 @@
       ${MP.active() ? `<button class="btn" data-action="mpLobby" title="Lobby and chat">Lobby ${esc(MP.lobby.code)}</button>` : ''}
       ${speedControls()}`;
   };
+
+  function fmtUsers(m) { return m >= 1000 ? (m / 1000).toFixed(2) + 'B' : m >= 10 ? Math.round(m) + 'M' : m.toFixed(1) + 'M'; }
+  function usersLabel() {
+    if (!FL.Growth || !S.growth) return '—';
+    const g = FL.Growth.growthRate(S);
+    return `${fmtUsers(FL.Growth.users(S))}${g != null ? ` <small class="${g >= 0 ? 'pos' : 'neg'}">${g >= 0 ? '+' : ''}${Math.round(g * 100)}%/q</small>` : ''}`;
+  }
 
   function speedControls() {
     const cur = MP.active() ? (MP.lobby.settings.speed || 1) : speed;
@@ -325,7 +333,9 @@
         <div class="w">${esc(r.warn)}</div><div class="pbar" style="margin-top:5px"><span style="width:${Math.min(100, Math.round(r.meter * 100))}%"></span></div></div>`).join('');
     const hidden = Sys.hiddenRiskCount(S);
     const rumors = Sys.rumors(S).map((r) => `<div class="risk" style="background:#10161f;border-color:#243045"><div class="top"><b>${esc(r.name)}</b><span class="hz ${r.good ? 'long' : 'short'}">brewing</span></div></div>`).join('');
+    const buffs = (S.buffs || []).filter((b) => b.until > S.week).map((b) => `<span class="buff ${b.good ? '' : 'bad'}" title="${esc(Object.entries(b.fx).map(([k, v]) => nameOf(k) + (v > 0 ? ' up' : ' down')).concat(Object.entries(b.mult).map(([k, v]) => k + ' ×' + v)).join(', '))}">${esc(b.name)} · ${b.until - S.week}w</span>`).join('');
     $('left').innerHTML = `
+      ${buffs ? `<h3>Active effects</h3><div class="buffs">${buffs}</div>` : ''}
       <h3>Objectives</h3>${objs || '<p class="note">New asks arrive next quarter.</p>'}
       <h3>Risk radar</h3>${risks}${rumors}
       ${!risks && !rumors ? '<p class="note">No warning signs yet.</p>' : ''}
@@ -576,6 +586,9 @@
         <button class="card ${d.id === pickedDiff ? 'sel' : ''}" data-action="pickDiff" data-arg="${d.id}"><h4>${esc(d.name)}</h4><p>${esc(d.blurb)}</p></button>`).join('')}</div>
       <div class="btn-row"><button class="btn primary big" data-action="found">Found the company</button>
         <button class="btn big" data-action="help">How to play</button></div>
+      <h3>Legacy <span class="muted" style="text-transform:none;letter-spacing:0">· ${meta.legacy || 0} points · earned by finishing runs, spent on permanent single-player perks</span></h3>
+      <div class="legacy">${FL.LEGACY_PERKS.map((p) => { const own = (meta.perks || []).includes(p.id); return `<div class="perk ${own ? 'owned' : ''}"><b>${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div>
+        <div class="btn-row">${own ? '<span class="pos">Owned</span>' : `<button class="btn" data-action="buyPerk" data-arg="${p.id}" ${(meta.legacy || 0) < p.cost ? 'disabled' : ''}>Buy · ${p.cost}</button>`}</div></div>`; }).join('')}</div>
       <h3>Multiplayer</h3>
       <p class="note">Race friends' labs — or their Claude companions — peer to peer. Each of you runs your own company; quarters advance when everyone is ready.</p>
       <div class="btn-row">
@@ -637,6 +650,7 @@
       ${r.bridge ? `<div class="callout warn">${esc(r.bridge)}</div>` : ''}
       ${sitLine(r.started, 'started')}${sitLine(r.ended, 'ended')}
       ${r.warnings.map((w) => `<div class="callout bad">${esc(w)}</div>`).join('')}
+      ${(r.world || []).map((w) => `<div class="callout ${w.hitYou ? (w.good ? 'good' : 'bad') : ''}"><b>World: ${esc(w.title)}</b> ${w.hitYou ? '' : '<span class="muted">(you were spared)</span>'} ${esc(w.text)}</div>`).join('')}
       ${campaignLines(r)}${warnLines}${rumorLines}${obLines}${hwLines(r)}${peopleLines(r)}
       <div class="rep-grid">
         <div>
@@ -707,6 +721,9 @@
   };
 
   UI.showEnding = function (end) {
+    let legacyNote = '';
+    if (!S.mp && !S.legacyAwarded) { S.legacyAwarded = FL.Legacy.earned(S); meta.legacy = (meta.legacy || 0) + S.legacyAwarded; saveMeta(); save(); }
+    if (S.legacyAwarded) legacyNote = `<div class="callout good"><b>+${S.legacyAwarded} Legacy</b> — spend it on permanent perks from the start screen.</div>`;
     if (!endingShown) { endingShown = true; A.play(end.win ? 'win' : 'lose'); if (end.win) setTimeout(() => FX.burst(window.innerWidth / 2, window.innerHeight / 3, null, 90), 200); }
     const H = S.history, n = H._cap.length;
     const w = 640, h = 200;
@@ -721,6 +738,7 @@
       <h2>${esc(S.company)} · ${E.quarterLabel(Math.min(S.turn, E.MAX_TURNS))}</h2>
       <h1 class="${end.win ? 'pos' : 'neg'}">${esc(end.title)}</h1>
       <p class="lede">${esc(end.text)}</p>
+      ${legacyNote}
       ${traits.length ? `<div class="callout"><b>The hidden world was:</b> ${traits.map(esc).join(' · ')}. Your evals had safety at ~${pct(FL.Fog.measured(S, 'safety').est)}; the truth was ${pct(S.values.safety)}.</div>` : ''}
       ${chart}
       <ul class="rep-list">
@@ -766,7 +784,7 @@
     menu: () => UI.showStart(),
     closeModal: () => closeModal(),
     pickArch: (id) => { pickedArch = id; document.querySelectorAll('.card[data-action=pickArch]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
-    found: () => startGame(E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff)),
+    found: () => { const g = E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff); FL.Legacy.apply(g, meta.perks); startGame(g); },
     setSpeed: (v) => {
       v = +v;
       if (MP.active()) { if (MP.isHost() && v > 0) MP.setSettings({ speed: v }); return; }
@@ -800,6 +818,23 @@
       save(); UI.renderAll();
     },
     archive: (tab) => showArchive(tab || 'all'),
+    growth: () => showGrowth(),
+    claimOpp: (uid) => {
+      const r = FL.Events.claim(S, uid);
+      if (!r.ok) { FX.toast(esc(r.reason), 'bad', 2500); renderOpps(); return r; }
+      A.play(r.wrath ? 'warn' : 'cash');
+      if (!r.wrath) { const b = $('oppLayer').getBoundingClientRect(); FX.burst(b.left + b.width / 2, b.top + b.height / 2, ['#fbbf24', '#fde68a'], 40); }
+      FX.toast(`<span class="tk">${esc(r.name)}</span>${esc(r.text)}`, r.wrath ? 'bad' : 'legendary', 5000);
+      afterAction(r);
+      renderOpps();
+      return r;
+    },
+    buyPerk: (id) => {
+      const p = FL.LEGACY_PERKS.find((x) => x.id === id);
+      meta.perks = meta.perks || [];
+      if (!p || meta.perks.includes(id) || (meta.legacy || 0) < p.cost) return;
+      meta.legacy -= p.cost; meta.perks.push(id); saveMeta(); A.play('milestone'); UI.showStart();
+    },
     mpHost: async (kind) => {
       try {
         await MP.hostLobby({ kind, name: 'Host', company: ($('coName') && $('coName').value.trim()) || 'Frontier Labs', archetype: pickedArch, difficulty: pickedDiff });
@@ -931,6 +966,37 @@
         </div>
         <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Done</button></div>
       </div>`);
+    $('modalCard').classList.add('wide');
+  }
+
+  function showGrowth() {
+    const g = FL.Growth.summary(S);
+    const maxPop = Math.max(...FL.REGIONS.map((r) => r.pop));
+    const links = [];
+    FL.REGIONS.forEach((r) => r.near.forEach((id) => { const o = FL.REGIONS.find((x) => x.id === id); if (o && r.id < id) links.push(`<line x1="${r.x}" y1="${r.y}" x2="${o.x}" y2="${o.y}" stroke="#1e3a5f" stroke-width="2" stroke-dasharray="4 6"/>`); }));
+    const nodes = g.regions.map((rg) => {
+      const r = FL.REGIONS.find((x) => x.id === rg.id);
+      const rad = 24 + 38 * Math.sqrt(r.pop / maxPop);
+      const ev = rg.event.ban ? `<text y="${rad + 30}" text-anchor="middle" fill="#fca5a5" font-size="12">restricted</text>` : rg.event.boost > 1 ? `<text y="${rad + 30}" text-anchor="middle" fill="#86efac" font-size="12">booming</text>` : '';
+      return `<g transform="translate(${r.x},${r.y})"><circle r="${rad}" fill="#13233b" stroke="#2a4a73"/>
+        <circle r="${rad * Math.sqrt(Math.min(1, rg.share / 0.6))}" fill="#22d3ee" opacity="${0.3 + 0.6 * Math.min(1, rg.share / 0.6)}"/>
+        <text y="-4" text-anchor="middle" fill="#e6ebf3" font-size="13" font-weight="700">${fmtUsers(rg.users)}</text>
+        <text y="12" text-anchor="middle" fill="#9fb3c8" font-size="11">${Math.round(rg.share * 100)}% of online</text>
+        <text y="${rad + 15}" text-anchor="middle" fill="#8a97ad" font-size="11">${esc(r.name)}</text>${ev}</g>`;
+    }).join('');
+    const series = (S.metrics || []).map((m) => m.users || 0);
+    openModal(`<h1>Growth</h1>
+      <h2>${fmtUsers(g.users)} users · ${fmtUsers(g.dau)} daily actives · ${Math.round(g.share * 100)}% of the online world${g.growthQoQ != null ? ` · ${g.growthQoQ >= 0 ? '+' : ''}${Math.round(g.growthQoQ * 100)}% this quarter` : ''}</h2>
+      <svg class="map" viewBox="0 0 1000 480">${links.join('')}${nodes}</svg>
+      <div class="rep-grid"><div><h3>Users over time</h3>${spark(series, 420, 70, { min: 0, color: '#22d3ee' })}
+        <p class="note">Users spread like an outbreak: fast where your product appeals and neighbours already use it, slow where price, regulation or access hold it back. Revenue is earned on these users, not on appeal.</p></div>
+      <div><h3>What moves it</h3><ul class="rep-list">
+        <li><span>Product appeal (the ceiling)</span><span class="m">${pct(g.appeal)}</span></li>
+        <li><span>Virality (hype, viral moments)</span><span class="m">${pct(S.values.hype)}</span></li>
+        <li><span>Brand (seeds new regions)</span><span class="m">${pct(S.values.brand)}</span></li>
+        <li><span>Price vs free tier</span><span class="m">${S.policies.pricing ? 'priced ' + pct(S.policies.pricing.level) : 'default'} / ${S.policies.freeTier ? 'free tier ' + pct(S.policies.freeTier.level) : 'no free tier'}</span></li>
+      </ul></div></div>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="closeModal">Close</button></div>`);
     $('modalCard').classList.add('wide');
   }
 
@@ -1091,6 +1157,8 @@
       items.push(`"${esc(a.quote)}" — ${esc(a.speaker || 'unknown')}, ${a.year}`);
     }
     if (h.length > 1) items.push(`<b>Last quarter</b> +${(h[h.length - 1] - h[h.length - 2]).toFixed(1)} capability`);
+    const jokes = FL.TICKER.filter((t) => (t.at == null || S.cap >= t.at) && (!t.broke || S.values.runway < 0.3) && (!t.toxic || (S.people && S.people.toxicity > 0.4)) && (t.safe !== false || S.values.trust < 0.35));
+    for (let i = 0; i < 2 && jokes.length; i++) items.splice(1 + i * 3, 0, `<i>${esc(jokes[(S.turn * 5 + i * 11 + S.week) % jokes.length].text.replace(/\{co\}/g, S.company))}</i>`);
     const track = $('tickerTrack');
     track.innerHTML = items.map((x) => `<span>${x}</span>`).join('');
     track.style.animationDuration = Math.max(30, track.textContent.length / 6) + 's';
@@ -1203,6 +1271,12 @@
           break;
         }
         case 'ending': handleEnding(ev.ending); break;
+        case 'world': A.play(ev.hitYou ? (ev.good ? 'chime' : 'crisis') : 'click'); T(`<span class="tk">World event${ev.hitYou ? '' : ' · you were spared'}</span><b>${esc(ev.title)}</b><br>${esc(ev.text)}${ev.rivalsHit.length ? `<br><span class="muted">Also hit: ${esc(ev.rivalsHit.join(', '))}</span>` : ''}`, ev.hitYou ? (ev.good ? 'good' : 'bad') : 'info', 8000); if (ev.hitYou && !ev.good) FX.shake($('boardWrap'), 4, 260); break;
+        case 'opp': A.play(ev.wrath ? 'warn' : 'artifact', { rarity: 'rare' }); renderOpps(); break;
+        case 'oppMissed': feed(`<b>Missed</b> ${esc(ev.name)}`); break;
+        case 'buff': feed(`<b>Effect</b> ${esc(ev.name)} for ${ev.weeks} weeks`); break;
+        case 'users': { A.play('milestone'); FX.flash('#4ade80'); const r = $('boardArea').getBoundingClientRect(); FX.burst(r.left + r.width / 2, r.top + r.height / 2, ['#4ade80', '#7dd3fc', '#fbbf24'], 70); T(`<span class="tk">Growth milestone</span><b>${esc(ev.text)}</b>`, 'legendary', 7000); break; }
+        case 'offerDeclined': T(`<span class="tk">Offer declined</span>${esc(ev.text)}`, 'bad', 4000); break;
       }
     }
   }
@@ -1221,11 +1295,20 @@
     box.innerHTML = `<div class="paper mini ${h.tabloid ? 'tabloid' : ''}" data-action="openNews" data-arg="${r.turn}"><div class="mast"><span>${esc(r.label)}</span><b>${esc(h.paper || 'The Ledger')}</b></div>
       <h1>${esc(h.head || r.label)}</h1><p>${esc(h.sub || '')}</p><span class="muted">Click to read the full edition</span></div>`;
     box.classList.remove('hidden');
-    clearTimeout(showNewsCard.t);
-    showNewsCard.t = setTimeout(() => box.classList.add('hidden'), 14000);
+  }
+
+  function renderOpps() {
+    const layer = $('oppLayer');
+    if (!layer || !S) return;
+    const sp = MP.active() ? (MP.lobby.settings.speed || 1) : speed;
+    layer.innerHTML = (S.opps || []).map((o) => {
+      const left = Math.max(0, o.until - S.week - loopAcc / WEEK_MS);
+      return `<button class="opp ${o.wrath ? 'wrath' : ''}" style="left:${12 + o.x * 76}%;top:${14 + o.y * 66}%" data-action="claimOpp" data-arg="${o.uid}">${esc(o.name)}<small>${sp ? `${Math.ceil((left * WEEK_MS) / sp / 1000)}s` : 'paused'} · click</small></button>`;
+    }).join('');
   }
 
   function liveRender() {
+    renderOpps();
     UI.renderTopbar();
     UI.renderLeft();
     UI.renderBoard();
@@ -1267,9 +1350,10 @@
       handleEvents();
       liveRender();
       if (now - lastSave > 5000) { lastSave = now; save(); }
-    } else if (S.inbox.length && now - lastInboxPaint > 500) {
+    } else if ((S.inbox.length || (S.opps || []).length) && now - lastInboxPaint > 500) {
       lastInboxPaint = now;
       renderInbox();
+      renderOpps();
     }
     const qp = $('qprog');
     if (qp) qp.style.width = Math.min(100, ((E.weekOfQuarter(S) + loopAcc / WEEK_MS) / E.TICKS_PER_Q) * 100) + '%';

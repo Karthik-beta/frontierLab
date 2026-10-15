@@ -42,6 +42,8 @@ into the game's advisor panel with `./frontier say`.
 | —                    | 171 verified real quotes/artifacts on the loading screen, in the newspaper and in the Archive; 78 achievements |
 | —                    | Marketing: brand vs hype, campaigns (Super Bowl in Q1 only), launch strategy |
 | —                    | Multiplayer: real-time, peer to peer, friends + AI labs, chat        |
+| —                    | Plague Inc-style growth map; world events hitting all, some or random labs |
+| —                    | Cookie Clicker-style golden opportunities, buffs, Legacy prestige perks, joke ticker |
 
 It runs in **real time**: the clock never stops for you, decisions expire, and you never see the
 whole picture. Rivals are estimates, your own safety is an eval estimate, and every run has a hidden

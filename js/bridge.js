@@ -173,6 +173,12 @@
   fleet | deals | accept <dealId> | sell <clusterId>
   campaigns | book <id> | unbook <id>   Marketing campaigns (results at quarter end)
   archive                     Your collection
+  growth                      Users by region (Plague-style map data)
+  opps | claim <#id>          Golden opportunities on the board (they vanish fast)
+  buffs | world               Active effects; recent world events
+  log [n] [type]              The journal: everything observable that happened (types: decided, policy, world, warning, ...)
+  metrics [weeks]             Weekly observable metrics (add --json for rival estimates)
+  export                      Everything observable in one JSON (--json)
   say <message>               Show an advisor note in the browser
   pause | resume              Real-time clock (single-player, or the host in multiplayer)
   lobby | chat <message>      Multiplayer lobby status and chat
@@ -290,6 +296,40 @@
       }
       case 'book': { const r = FL.Marketing.book(s, args[0]); U.refresh(r); return r.ok ? { ok: true, text: 'Booked. Results arrive at quarter end.' } : fail(r.reason); }
       case 'unbook': { const r = FL.Marketing.unbook(s, args[0]); U.refresh(r); return r.ok ? { ok: true, text: 'Booking cancelled and refunded.' } : fail(r.reason); }
+      case 'log': case 'journal': {
+        const n = Math.max(1, Math.min(500, parseInt(args.find((a) => /^\d+$/.test(a)) || '40', 10)));
+        const type = args.find((a) => !/^\d+$/.test(a));
+        const rows = (s.journal || []).filter((j) => !type || j.type === type).slice(-n);
+        return { ok: true, data: rows, text: rows.map((j) => `[${j.when}] ${j.type.padEnd(10)} ${j.text}`).join('\n') || 'Nothing logged yet.' };
+      }
+      case 'metrics': {
+        const n = Math.max(1, Math.min(560, parseInt(args[0] || '13', 10)));
+        const rows = (s.metrics || []).slice(-n);
+        const cols = ['week', 'cash', 'revenueRate', 'costRate', 'users', 'capability', 'valuation', 'hype', 'brand', 'safetyEval', 'trustPoll'];
+        return { ok: true, data: rows, text: [cols.join('\t'), ...rows.map((r) => cols.map((c) => r[c]).join('\t'))].join('\n') + '\n(rivals per row are in --json)' };
+      }
+      case 'export': {
+        const data = { snapshot: B.snapshot(), journal: s.journal || [], metrics: s.metrics || [], newspapers: (s.newspapers || []).map((n) => ({ label: n.label, headline: n.headline, finance: n.finance, world: n.world, notes: n.notes, expired: n.expired, warnings: n.warnings })), decisions: s.log || [] };
+        return { ok: true, data, text: `Export: ${data.journal.length} journal entries, ${data.metrics.length} weekly metric rows, ${data.newspapers.length} newspapers. Use --json (e.g. ./frontier export --json > run.json).` };
+      }
+      case 'growth': case 'users': {
+        const g = FL.Growth.summary(s);
+        return { ok: true, data: g, text: [`Users ${Math.round(g.users)}M · daily actives ${Math.round(g.dau)}M · ${Math.round(g.share * 100)}% of the online world${g.growthQoQ != null ? ` · ${Math.round(g.growthQoQ * 100)}% QoQ` : ''} · appeal ${pct(g.appeal)}`,
+          ...g.regions.map((r) => `  ${r.name.padEnd(24)} ${String(Math.round(r.users)).padStart(5)}M  ${pct(r.share)}${r.event.ban ? ' · restricted' : r.event.boost > 1 ? ' · booming' : ''}`)].join('\n') };
+      }
+      case 'opps': case 'opportunities': {
+        const list = (s.opps || []).map((o) => ({ id: o.uid, name: o.name, risky: o.wrath, weeksLeft: Math.max(0, o.until - s.week) }));
+        return { ok: true, data: list, text: list.map((o) => `#${o.id} ${o.name}${o.risky ? ' (risky)' : ''} — ${o.weeksLeft} weeks left`).join('\n') || 'No opportunities on the board right now.' };
+      }
+      case 'claim': { const r = U.act('claimOpp', String(args[0] || '').replace('#', '')); return r && r.ok ? { ok: true, text: `${r.name}: ${r.text}` } : fail((r && r.reason) || 'Could not claim.'); }
+      case 'buffs': case 'effects': {
+        const list = (s.buffs || []).filter((b) => b.until > s.week).map((b) => ({ name: b.name, weeksLeft: b.until - s.week, good: b.good }));
+        return { ok: true, data: list, text: list.map((b) => `${b.name} — ${b.weeksLeft} weeks left`).join('\n') || 'No active effects.' };
+      }
+      case 'world': {
+        const rows = (s.journal || []).filter((j) => j.type === 'world').slice(-10);
+        return { ok: true, data: rows, text: rows.map((j) => `[${j.when}] ${j.text}`).join('\n') || 'No world events yet.' };
+      }
       case 'archive': { const m = U.meta(); return { ok: true, data: m, text: `${m.artifacts.length}/${FL.ARCHIVE.length} artifacts, ${m.achievements.length}/${FL.ACHIEVEMENTS.length} achievements.` }; }
       case 'say': case 'advise': U.advisor(args.join(' ')); return { ok: true, text: 'Shown in the browser.' };
       default: return fail(`Unknown command "${cmd}". Try: frontier help`);

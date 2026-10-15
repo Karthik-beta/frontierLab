@@ -90,8 +90,8 @@
     const t = document.createElement('div');
     t.className = 'toast ' + (kind || 'info');
     t.innerHTML = html;
-    box.appendChild(t);
-    while (box.children.length > 3) box.firstChild.remove();
+    box.insertBefore(t, box.firstChild);
+    while (box.children.length > 5) box.lastChild.remove();
     setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, ms || 4200);
     return t;
   };

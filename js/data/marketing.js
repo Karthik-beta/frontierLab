@@ -69,7 +69,7 @@
 
   /* The launch decision for every new model generation (queued as dilemma 'modelLaunch'). */
   FL.DILEMMAS.push({
-    id: 'modelLaunch', title: 'Launch Day', launch: true, when: () => false,
+    id: 'modelLaunch', title: 'Launch Day', launch: true, default: 2, when: () => false,
     text: 'Your new flagship model is trained, evaluated and ready. How do you put it into the world?',
     options: [
       { label: 'Low-key research preview', desc: 'Ship it quietly and let the product speak. Sometimes the quiet ones explode.',

@@ -335,3 +335,32 @@ table.fleet td { padding: 6px 4px; border-bottom: 1px solid var(--line-soft); } 
 .rbar { position: relative; }
 .rbar .range { position: absolute; top: 0; bottom: 0; opacity: .25; border-radius: 4px; }
 @media (max-width: 1100px) { #inbox { left: 14px; width: min(360px, calc(100vw - 28px)); } #newsCard { right: 14px; } }
+
+/* ── Dock under the board (inbox · live feed · newspaper): nothing overlaps the wheel ── */
+#boardWrap { display: flex; flex-direction: column; }
+#boardArea { position: relative; flex: 1; min-height: 0; }
+#dock { flex: none; height: 214px; display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; padding: 8px 10px 34px; border-top: 1px solid var(--line); background: #0a0e15; }
+.dock-col { min-width: 0; display: flex; flex-direction: column; }
+.dock-col h4 { margin: 0 0 6px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+#inbox { position: static; width: auto; max-height: none; flex: 1; display: flex; flex-direction: row; gap: 8px; overflow-x: auto; overflow-y: hidden; z-index: auto; }
+#inbox .dcard { flex: 0 0 290px; overflow-y: auto; box-shadow: none; }
+#inbox:empty::before { content: 'Nothing waiting. The clock is running.'; color: var(--dim); font-size: 12px; }
+#toasts { position: static; width: auto; flex: 1; overflow: hidden; z-index: auto; pointer-events: auto; gap: 5px; }
+#toasts .toast { box-shadow: none; padding: 6px 9px; font-size: 12px; animation: toastIn 250ms ease-out; }
+#newsCard { position: static; width: auto; flex: 1; overflow: hidden; animation: none; }
+#newsCard .paper.mini { box-shadow: none; height: 100%; overflow: hidden; }
+#oppLayer { position: absolute; inset: 0; pointer-events: none; }
+.opp { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; border: 2px solid #fde68a; background: radial-gradient(circle, #fbbf24, #b45309); color: #1c1206;
+  border-radius: 999px; padding: 8px 14px; font-weight: 700; font-size: 12px; cursor: pointer; box-shadow: 0 0 0 0 #fbbf2499; animation: oppPulse 1.2s ease-in-out infinite; white-space: nowrap; }
+.opp.wrath { background: radial-gradient(circle, #f87171, #7f1d1d); border-color: #fca5a5; color: #fff; }
+.opp small { display: block; font-weight: 500; font-size: 10px; opacity: .8; }
+@keyframes oppPulse { 50% { box-shadow: 0 0 0 14px #fbbf2400; transform: translate(-50%, -50%) scale(1.06); } }
+.buffs { display: flex; flex-wrap: wrap; gap: 5px; }
+.buff { font-size: 11px; padding: 3px 8px; border-radius: 10px; border: 1px solid #14532d; color: #bbf7d0; background: #0c1f14; }
+.buff.bad { border-color: #7f1d1d; color: #fecaca; background: #1f0c0c; }
+.kpi.click { cursor: pointer; } .kpi.click:hover .v { text-decoration: underline; }
+.map { width: 100%; background: radial-gradient(ellipse at center, #0f1a2e, #070b13); border-radius: 10px; }
+.legacy { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.perk { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12.5px; }
+.perk.owned { border-color: #d4a017; }
+@media (max-width: 1000px) { #dock { grid-template-columns: 1fr; height: auto; } }
