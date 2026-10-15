@@ -262,11 +262,10 @@
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
-      <button class="btn" data-action="archive">Archive ${meta.artifacts.length}/${FL.ARCHIVE.length}</button>
-      <button class="btn" data-action="mute" title="Sound (M)">${A.isMuted() ? 'Sound off' : 'Sound on'}</button>
+      <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b>/${FL.ARCHIVE.length}</button>
+      <button class="btn" data-action="mute" title="Sound (M)">${A.isMuted() ? 'Muted' : 'Sound'}</button>
       <button class="btn" data-action="briefing">Briefing</button>
-      <button class="btn" data-action="help">How to play</button>
-      <button class="btn" data-action="menu">New game</button>
+      <button class="btn" data-action="gameMenu">Menu</button>
       <button class="btn primary big" data-action="endTurn" ${S.ended ? 'disabled' : ''}>End quarter</button>`;
   };
 
@@ -749,6 +748,11 @@
       else closeModal();
     },
     archive: (tab) => showArchive(tab || 'all'),
+    gameMenu: () => openModal(`<h1>Menu</h1><div class="btn-row">
+      <button class="btn big" data-action="help">How to play</button>
+      <button class="btn big" data-action="archive">The Archive</button>
+      <button class="btn big danger" data-action="menu">New game</button>
+      <button class="btn big" data-action="closeModal">Back to the board</button></div>`),
     mute: () => { A.setMuted(!A.isMuted()); UI.renderTopbar(); },
     choose: (i) => {
       const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);

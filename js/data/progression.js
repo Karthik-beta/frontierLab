@@ -71,7 +71,7 @@
       met: (s, p) => v(s, 'legal') <= p.target, progress: (s, p) => Math.min(1, p.target / Math.max(0.01, v(s, 'legal'))) },
     // mission
     { id: 'safetyTarget', owner: 'safetyCommunity', kind: 'reach', turns: 6,
-      setup: (s) => ({ target: Math.min(0.85, v(s, 'safety') + 0.08) }),
+      setup: (s) => ({ target: Math.min(0.85, Math.max(0.2, v(s, 'safety') + 0.08)) }),
       text: (p) => `Raise Safety Maturity to ${pctTxt(p.target)}`,
       met: (s, p) => v(s, 'safety') >= p.target, progress: (s, p) => v(s, 'safety') / p.target },
     { id: 'trustTarget', owner: 'media', kind: 'reach', turns: 5,

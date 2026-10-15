@@ -30,14 +30,16 @@ button { font-family: inherit; }
 
 /* ── Top bar ── */
 #topbar {
-  grid-area: top; display: flex; align-items: center; gap: 22px; padding: 0 18px;
+  grid-area: top; display: flex; align-items: center; gap: 16px; padding: 0 14px; white-space: nowrap; overflow: hidden;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { font-family: var(--mono); font-weight: 700; letter-spacing: 0.22em; font-size: 15px; color: var(--accent); }
 .brand small { display: block; letter-spacing: 0.04em; font-weight: 500; color: var(--muted); font-size: 11px; font-family: var(--sans); }
 .kpi { display: flex; flex-direction: column; line-height: 1.15; }
 .kpi .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-.kpi .v { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+.kpi .v { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+#topbar .btn { padding: 6px 10px; } #topbar .btn.big { padding: 9px 14px; }
+@media (max-width: 1360px) { #topbar .era-chip { display: none; } }
 .kpi .v.pos { color: var(--pos); } .kpi .v.neg { color: var(--neg); } .kpi .v.warn { color: var(--warn); }
 .spacer { flex: 1; }
 .btn {
