@@ -1,33 +1,686 @@
-/* ui.js — DOM + SVG rendering. */
+/* ui.js — DOM + SVG rendering for the radial policy board, side panels and modals. */
 (function (FL) {
   'use strict';
+  const E = FL.Engine;
   const UI = {};
+  const SAVE_KEY = 'frontierlab.save.v1';
 
-  /** Boot the UI: start screen or continue saved game. TODO: implement. Depends on: FL.Engine. */
-  UI.init = function () { throw new Error('NotImplemented: init'); };
+  let S = null;           // game state
+  let pos = {};           // node id -> {x, y, r}
+  let sectors = [];       // policy category arcs
+  let selected = null;    // inspected node id (pinned highlight)
+  let hovered = null;
+  let preview = {};       // policy id -> slider level not yet applied
+  let pickedArch = FL.ARCHETYPES[0].id;
+  let lastReport = null;
 
-  /** Compute board coordinates for every node. TODO: implement. Acceptance: policies on outer
-   * ring grouped by category, stats on middle ring, active situations around centre. */
-  UI.layout = function (state) { throw new Error('NotImplemented: layout'); };
+  const R_POLICY = 418, R_STAT = 290, R_SH = 200, R_SIT = 128, R_CORE = 72;
 
-  /** Render the SVG board. TODO: implement. */
-  UI.renderBoard = function () { throw new Error('NotImplemented: renderBoard'); };
+  /* Text monograms for board nodes (stats show their value instead). */
+  const ABBR = {
+    pretrain: 'PT', reasoning: 'RL', alignment: 'AL', interp: 'IN', publish: 'PB', openWeights: 'OW', synthData: 'SD', agents: 'AG',
+    cloudDeal: 'CL', datacenters: 'DC', chips: 'SI', energy: 'EN', gpuSpot: 'GP',
+    comp: 'PAY', tenders: 'TO', poach: 'PO', culture: 'MC', crunch: 'CR', hiring: 'HI',
+    consumerApp: 'APP', freeTier: 'FT', api: 'API', pricing: 'PR', entSales: 'ENT', coding: 'COD', ads: 'ADS', moderation: 'CF',
+    redteam: 'RT', rsp: 'RSP', audits: 'AU', secProgram: 'SEC', lobbying: 'LOB', defense: 'DEF', licensing: 'LIC', scraping: 'WS',
+    marketing: 'BM', ceoTour: 'CEO', nonprofit: 'NP', benchmarks: 'BX', execTeam: 'EX',
+    board: 'BD', investors: 'VC', researchers: 'RS', safetyCommunity: 'SC', enterprise: 'EC', consumers: 'CU', regulators: 'RG', openSource: 'OS', media: 'MD', partner: 'BT',
+    talentExodus: 'TE', gpuCrunch: 'GS', probe: 'INV', injunction: 'INJ', lawsuit: 'LAW', jailbreak: 'JB', weightsLeak: 'WL', aiPanic: 'AP',
+    misuse: 'MIS', bubble: 'BUB', viral: 'VIR', frontierLeader: '#1', missionCulture: 'MDC',
+  };
+  const STAT_ORDER = ['velocity', 'compute', 'talent', 'morale', 'data', 'openness', 'security', 'safety', 'trust', 'regHeat', 'legal',
+    'hype', 'quality', 'adoption', 'monetization', 'revGrowth', 'runway', 'lead'];
 
-  /** Top bar, stakeholder list, race panel. TODO: implement. */
-  UI.renderTopbar = function () { throw new Error('NotImplemented: renderTopbar'); };
-  UI.renderLeft = function () { throw new Error('NotImplemented: renderLeft'); };
+  // ── helpers ──────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const pct = (v) => Math.round(v * 100) + '%';
+  const spct = (v) => (v >= 0 ? '+' : '') + Math.round(v * 100) + '%';
+  const money = (m) => E.fmtMoney(m);
+  const nameOf = (id) => (E.node(id) ? E.node(id).def.name : id);
+  const catOf = (id) => FL.CATEGORIES.find((c) => c.id === E.node(id).def.cat);
+  const isGood = (id) => {
+    const n = E.node(id);
+    if (!n) return true;
+    if (n.type === 'situation') return n.def.good;
+    if (n.type === 'stat' || n.type === 'indicator') return n.def.good !== false;
+    return true;
+  };
+  /** Red→amber→green for a 0..1 "goodness". */
+  const goodColor = (t) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 125)}, 70%, 55%)`;
+  const statColor = (id, v) => goodColor(isGood(id) ? v : 1 - v);
+  const happyColor = (h) => goodColor((h + 1) / 2);
+  const runwayQ = () => (S.finance.net >= 0 ? Infinity : S.cash / -S.finance.net);
 
-  /** Inspector for a node id (policy/stat/situation/stakeholder) or finances. TODO: implement. */
-  UI.inspect = function (id) { throw new Error('NotImplemented: inspect'); };
+  function save() {
+    try { localStorage.setItem(SAVE_KEY, E.serialize(S)); } catch (e) { /* storage unavailable */ }
+  }
+  function loadSave() {
+    try { const j = localStorage.getItem(SAVE_KEY); return j ? E.deserialize(j) : null; } catch (e) { return null; }
+  }
 
-  /** Draw/clear hover connection lines. TODO: implement. */
-  UI.highlight = function (id) { throw new Error('NotImplemented: highlight'); };
+  function spark(arr, w, h, opts) {
+    opts = opts || {};
+    if (!arr || arr.length < 2) return `<svg width="${w}" height="${h}"></svg>`;
+    const lo = opts.min != null ? opts.min : Math.min(...arr), hi = opts.max != null ? opts.max : Math.max(...arr);
+    const span = hi - lo || 1;
+    const pts = arr.map((v, i) => `${(i / (arr.length - 1)) * w},${h - 2 - ((v - lo) / span) * (h - 4)}`).join(' ');
+    const zero = opts.zero != null ? `<line x1="0" x2="${w}" y1="${h - 2 - ((opts.zero - lo) / span) * (h - 4)}" y2="${h - 2 - ((opts.zero - lo) / span) * (h - 4)}" stroke="#2a3549" stroke-dasharray="3 3"/>` : '';
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${zero}<polyline points="${pts}" fill="none" stroke="${opts.color || '#7dd3fc'}" stroke-width="2"/></svg>`;
+  }
 
-  /** Modals: report, dilemma, ending, start. TODO: implement. */
-  UI.showReport = function (report) { throw new Error('NotImplemented: showReport'); };
-  UI.showDilemma = function () { throw new Error('NotImplemented: showDilemma'); };
-  UI.showEnding = function (ending) { throw new Error('NotImplemented: showEnding'); };
-  UI.showStart = function () { throw new Error('NotImplemented: showStart'); };
+  // ── layout ───────────────────────────────────────────────
+  UI.layout = function () {
+    pos = {};
+    sectors = [];
+    const gap = 1.4;
+    const total = FL.POLICIES.length + gap * FL.CATEGORIES.length;
+    const step = (2 * Math.PI) / total;
+    let a = -Math.PI / 2 + (gap * step) / 2;
+    for (const c of FL.CATEGORIES) {
+      const a0 = a;
+      for (const p of FL.POLICIES.filter((x) => x.cat === c.id)) {
+        const ang = a + step / 2;
+        pos[p.id] = { x: R_POLICY * Math.cos(ang), y: R_POLICY * Math.sin(ang), r: 21 };
+        a += step;
+      }
+      sectors.push({ cat: c, a0, a1: a });
+      a += gap * step;
+    }
+    STAT_ORDER.forEach((id, i) => {
+      const ang = -Math.PI / 2 + ((i + 0.5) / STAT_ORDER.length) * 2 * Math.PI;
+      pos[id] = { x: R_STAT * Math.cos(ang), y: R_STAT * Math.sin(ang), r: 25 };
+    });
+    FL.STAKEHOLDERS.forEach((s, i) => {
+      const ang = -Math.PI / 2 + ((i + 0.5) / FL.STAKEHOLDERS.length) * 2 * Math.PI;
+      pos[s.id] = { x: R_SH * Math.cos(ang), y: R_SH * Math.sin(ang), r: 19 };
+    });
+    pos.capability = { x: 0, y: 0, r: R_CORE };
+    const act = S ? FL.SITUATIONS.filter((s) => S.active[s.id]) : [];
+    act.forEach((s, i) => {
+      const ang = -Math.PI / 2 + ((i + 0.5) / Math.max(act.length, 1)) * 2 * Math.PI;
+      pos[s.id] = { x: R_SIT * Math.cos(ang), y: R_SIT * Math.sin(ang), r: 20 };
+    });
+  };
+
+  function arcPath(r, a0, a1, reverse) {
+    const p = (a) => `${(r * Math.cos(a)).toFixed(1)} ${(r * Math.sin(a)).toFixed(1)}`;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    return reverse ? `M ${p(a1)} A ${r} ${r} 0 ${large} 0 ${p(a0)}` : `M ${p(a0)} A ${r} ${r} 0 ${large} 1 ${p(a1)}`;
+  }
+  function ring(r, v, color, width) {
+    const C = 2 * Math.PI * r;
+    return `<circle r="${r}" fill="none" stroke="#1f2a3c" stroke-width="${width}"/>` +
+      `<circle r="${r}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-dasharray="${(C * Math.max(0.001, v)).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90)"/>`;
+  }
+
+  // ── board ────────────────────────────────────────────────
+  UI.renderBoard = function () {
+    UI.layout();
+    const out = [];
+    out.push(`<circle r="${R_POLICY}" fill="none" stroke="#18212f" stroke-width="56"/>`);
+    out.push(`<circle r="${R_STAT}" fill="none" stroke="#151d2a" stroke-width="2"/>`);
+    out.push(`<circle r="${R_SH}" fill="none" stroke="#151d2a" stroke-width="2" stroke-dasharray="2 6"/>`);
+    sectors.forEach((s, i) => {
+      const mid = (s.a0 + s.a1) / 2;
+      const bottom = Math.sin(mid) > 0.15;
+      out.push(`<path d="${arcPath(R_POLICY + 34, s.a0 + 0.01, s.a1 - 0.01)}" stroke="${s.cat.color}" stroke-width="3" fill="none" opacity="0.8"/>`);
+      out.push(`<path id="sec${i}" d="${arcPath(bottom ? R_POLICY + 52 : R_POLICY + 42, s.a0, s.a1, bottom)}" fill="none"/>`);
+      out.push(`<text class="cat-label" fill="${s.cat.color}"><textPath href="#sec${i}" startOffset="50%" text-anchor="middle">${esc(s.cat.name)}</textPath></text>`);
+    });
+    out.push('<g id="wires"></g>');
+
+    for (const p of FL.POLICIES) {
+      const q = pos[p.id], st = S.policies[p.id], c = catOf(p.id).color;
+      const lvl = st ? st.level : 0;
+      out.push(`<g class="node policy ${st ? '' : 'inactive'}" data-id="${p.id}" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">` +
+        (st ? ring(q.r + 5, lvl, c, 3) : '') +
+        `<circle class="body" r="${q.r}" fill="${st ? c + '33' : '#141b28'}" stroke="${st ? c : '#38445a'}" stroke-width="${st ? 2 : 1.5}" ${st ? '' : 'stroke-dasharray="3 3"'}/>` +
+        (S.turnChanges[p.id] ? `<circle r="4" cx="${q.r - 3}" cy="${-q.r + 3}" fill="#fbbf24"/>` : '') +
+        `<text class="abbr">${ABBR[p.id]}</text></g>`);
+    }
+    for (const id of STAT_ORDER) {
+      const q = pos[id], v = S.values[id], col = statColor(id, v);
+      out.push(`<g class="node stat" data-id="${id}" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">` +
+        ring(q.r + 4, v, col, 4) +
+        `<circle class="body" r="${q.r}" fill="#101724" stroke="#2a3549" stroke-width="1"/>` +
+        `<text class="val" fill="${col}">${Math.round(v * 100)}</text>` +
+        `<text class="lbl" y="${q.r + 18}">${esc(nameOf(id))}</text></g>`);
+    }
+    for (const s of FL.STAKEHOLDERS) {
+      const q = pos[s.id], h = S.happiness[s.id], col = happyColor(h);
+      out.push(`<g class="node stakeholder" data-id="${s.id}" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">` +
+        `<circle class="body" r="${q.r}" fill="${col}22" stroke="${col}" stroke-width="2"/>` +
+        `<text class="abbr" style="font-size:10.5px">${ABBR[s.id]}</text>` +
+        `<text class="lbl" y="${q.r + 13}">${esc(s.name.replace('The ', ''))}</text></g>`);
+    }
+    for (const s of FL.SITUATIONS) {
+      if (!S.active[s.id]) continue;
+      const q = pos[s.id], col = s.good ? '#4ade80' : '#f87171';
+      out.push(`<g class="node situation" data-id="${s.id}" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">` +
+        `<circle class="body ${s.good ? '' : 'sit-pulse'}" r="${q.r}" fill="${s.good ? '#14361f' : '#451a1a'}" stroke="${col}" stroke-width="2"/>` +
+        `<text class="abbr" style="font-size:10px;fill:${col}">${ABBR[s.id]}</text></g>`);
+    }
+    // core gauge: our capability vs rivals
+    const ticks = S.rivals.map((r) => {
+      const ang = -Math.PI / 2 + Math.min(1, r.cap / E.AGI) * 2 * Math.PI;
+      const c = Math.cos(ang), sn = Math.sin(ang);
+      return `<line x1="${(52 * c).toFixed(1)}" y1="${(52 * sn).toFixed(1)}" x2="${(76 * c).toFixed(1)}" y2="${(76 * sn).toFixed(1)}" stroke="${r.color}" stroke-width="3"/>`;
+    }).join('');
+    out.push(`<g class="node core" data-id="capability">` +
+      `<circle class="body" r="${R_CORE}" fill="#0d131e" stroke="#2a3549"/>` + ring(62, S.cap / E.AGI, '#7dd3fc', 9) + ticks +
+      `<text class="val" y="-8" style="font-size:30px" fill="#e6ebf3">${Math.floor(S.cap)}</text>` +
+      `<text class="lbl" y="16" style="font-size:9px;letter-spacing:.15em">CAPABILITY</text>` +
+      `<text class="lbl" y="29" style="font-size:9px">AGI AT 100</text></g>`);
+
+    $('board').innerHTML = out.join('');
+    applyHighlight();
+  };
+
+  function wirePath(a, b) {
+    const cx = (a.x + b.x) * 0.3, cy = (a.y + b.y) * 0.3;
+    const off = (p, r) => { const dx = cx - p.x, dy = cy - p.y, d = Math.hypot(dx, dy) || 1; return { x: p.x + (dx / d) * (r + 3), y: p.y + (dy / d) * (r + 3) }; };
+    const s = off(a, a.r), t = off(b, b.r);
+    return `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${t.x.toFixed(1)} ${t.y.toFixed(1)}`;
+  }
+
+  function applyHighlight() {
+    const svg = $('board');
+    const id = hovered || selected;
+    const wires = $('wires');
+    svg.querySelectorAll('.node.lit, .node.sel').forEach((n) => n.classList.remove('lit', 'sel'));
+    if (selected) { const n = svg.querySelector(`.node[data-id="${selected}"]`); if (n) n.classList.add('sel'); }
+    if (!id || !pos[id]) { svg.classList.remove('focus'); wires.innerHTML = ''; return; }
+    svg.classList.add('focus');
+    const edges = E.effectsInto(id).concat(E.effectsFrom(id)).filter((e) => pos[e.from] && pos[e.to]);
+    const lit = new Set([id]);
+    wires.innerHTML = edges.map((e) => {
+      lit.add(e.from); lit.add(e.to);
+      const c = E.contribution(S, e);
+      const live = Math.abs(c) > 0.002;
+      const sign = (live ? c : e.k) * (isGood(e.to) ? 1 : -1);
+      const col = sign >= 0 ? '#4ade80' : '#f87171';
+      const w = live ? Math.min(7, 1.5 + Math.abs(c) * 18) : 1.5;
+      return `<path class="wire" d="${wirePath(pos[e.from], pos[e.to])}" stroke="${col}" stroke-width="${w.toFixed(1)}" opacity="${live ? 0.9 : 0.35}"/>`;
+    }).join('');
+    lit.forEach((n) => { const el = svg.querySelector(`.node[data-id="${n}"]`); if (el) el.classList.add('lit'); });
+  }
+
+  // ── top bar & left panel ─────────────────────────────────
+  UI.renderTopbar = function () {
+    const rq = runwayQ();
+    const net = S.finance.net;
+    const toRound = S.nextRound - S.turn;
+    $('topbar').innerHTML = `
+      <div class="brand">FRONTIER<small>${esc(S.company)}</small></div>
+      <div class="kpi"><span class="k">Quarter</span><span class="v">${E.quarterLabel(S.turn)}</span></div>
+      <div class="kpi"><span class="k">Cash</span><span class="v ${S.cash < 0 ? 'neg' : ''}">${money(S.cash)}</span></div>
+      <div class="kpi"><span class="k">Net / quarter</span><span class="v ${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${money(net)}</span></div>
+      <div class="kpi"><span class="k">Runway</span><span class="v ${rq < toRound + 1 ? 'neg' : rq < toRound + 3 ? 'warn' : ''}">${rq === Infinity ? 'Profitable' : rq.toFixed(1) + ' q'}</span></div>
+      <div class="kpi"><span class="k">Valuation</span><span class="v">${money(S.valuation)}</span></div>
+      <div class="kpi"><span class="k">Next round</span><span class="v">${toRound <= 0 ? 'This quarter' : 'in ' + toRound + ' q'}</span></div>
+      <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
+      <div class="spacer"></div>
+      <button class="btn" data-action="briefing">Briefing</button>
+      <button class="btn" data-action="help">How to play</button>
+      <button class="btn" data-action="menu">New game</button>
+      <button class="btn primary big" data-action="endTurn" ${S.ended ? 'disabled' : ''}>End quarter</button>`;
+  };
+
+  UI.renderLeft = function () {
+    const rows = FL.STAKEHOLDERS.slice().sort((a, b) => b.weight - a.weight).map((s) => {
+      const h = S.happiness[s.id];
+      const w = Math.abs(h) * 50;
+      return `<div class="sh-row ${selected === s.id ? 'sel' : ''}" data-action="inspect" data-arg="${s.id}" title="${esc(s.desc)}">
+        <span class="name">${esc(s.name)}</span>
+        <div class="cbar"><span style="background:${happyColor(h)};${h >= 0 ? 'left:50%' : 'right:50%'};width:${w}%"></span></div>
+        <span class="num" style="color:${happyColor(h)}">${spct(h)}</span></div>`;
+    }).join('');
+    const appr = E.approval(S);
+    const conf = E.investorConfidence(S);
+    const racers = [{ name: 'You', cap: S.cap, color: '#7dd3fc' }].concat(S.rivals).sort((a, b) => b.cap - a.cap);
+    const race = racers.map((r) => `<div class="race-row"><div class="lbl"><span>${esc(r.name)}</span><b>${Math.floor(r.cap)}</b></div>
+      <div class="rbar"><span style="width:${Math.min(100, r.cap)}%;background:${r.color}"></span></div></div>`).join('');
+    const board = S.happiness.board;
+    $('left').innerHTML = `
+      <h3>Stakeholders</h3>${rows}
+      <div class="approval"><span>Overall approval</span><b style="color:${happyColor(appr)}">${spct(appr)}</b></div>
+      <div class="approval" style="border-top:0;margin-top:0;padding-top:0"><span>Investor confidence</span><b style="color:${happyColor(conf)}">${spct(conf)}</b></div>
+      ${board < -0.3 ? `<div class="callout bad">The board is at ${spct(board)}. Below -45% they may fire you.</div>` : ''}
+      <h3>The race to AGI</h3>${race}
+      <p class="note">First to 100 wins the race. What happens next depends on your safety maturity (${pct(S.values.safety)} now).</p>`;
+  };
+
+  // ── inspector ────────────────────────────────────────────
+  function effRow(target, val, extra, k) {
+    const good = isGood(target);
+    const v = val;
+    const col = (v * (good ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
+    const w = Math.min(100, Math.abs(v) * 220);
+    return `<div class="eff" data-action="inspect" data-arg="${target}">
+      <span>${esc(nameOf(target))} ${extra ? `<span class="tag">${extra}</span>` : ''}</span>
+      <div class="cbar"><span style="background:${col};${v >= 0 ? 'left:50%' : 'right:50%'};width:${w / 2}%"></span></div>
+      <span class="num" style="color:${col}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(k ? 0 : 1)}</span></div>`;
+  }
+  const lagTag = (lag) => (lag >= 4 ? 'slow' : lag <= 1 ? 'fast' : '');
+
+  function driversHTML(id) {
+    const ins = E.effectsInto(id);
+    const live = ins.filter((e) => Math.abs(E.contribution(S, e)) > 0.002)
+      .sort((a, b) => Math.abs(E.contribution(S, b)) - Math.abs(E.contribution(S, a)));
+    const levers = ins.filter((e) => E.nodeType(e.from) === 'policy' && !S.policies[e.from]);
+    let h = `<h3>Driven by</h3>` + (live.length ? live.map((e) => effRowFrom(e)).join('') : '<p class="note">Nothing is moving this yet.</p>');
+    if (levers.length) h += `<h3>Policies you could enact</h3>` + levers.map((e) => effRowFrom(e, true)).join('');
+    return h;
+  }
+  function effRowFrom(e, potential) {
+    const v = potential ? e.k * E.curve(e.curve, 0.6) : E.contribution(S, e);
+    const good = isGood(e.to);
+    const col = (v * (good ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
+    const w = Math.min(100, Math.abs(v) * 220);
+    return `<div class="eff" data-action="inspect" data-arg="${e.from}">
+      <span>${esc(nameOf(e.from))} <span class="tag">${potential ? 'not active' : lagTag(e.lag)}</span></span>
+      <div class="cbar"><span style="background:${col};${v >= 0 ? 'left:50%' : 'right:50%'};width:${w / 2}%;opacity:${potential ? 0.5 : 1}"></span></div>
+      <span class="num" style="color:${col}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}</span></div>`;
+  }
+  function affectsHTML(id) {
+    const outs = E.effectsFrom(id).sort((a, b) => Math.abs(E.contribution(S, b)) - Math.abs(E.contribution(S, a)));
+    if (!outs.length) return '';
+    return `<h3>Affects</h3>` + outs.map((e) => effRow(e.to, E.contribution(S, e), lagTag(e.lag))).join('');
+  }
+
+  UI.inspect = function (id) {
+    selected = id || null;
+    const el = $('right');
+    if (!id) { el.innerHTML = briefingHTML(); return; }
+    const n = E.node(id);
+    if (!n) { el.innerHTML = briefingHTML(); return; }
+    if (n.type === 'policy') el.innerHTML = policyHTML(n.def);
+    else if (n.type === 'stat' || n.type === 'indicator') el.innerHTML = statHTML(n.def, n.type);
+    else if (n.type === 'stakeholder') el.innerHTML = stakeholderHTML(n.def);
+    else el.innerHTML = situationHTML(n.def);
+    const slider = $('lvl');
+    if (slider) slider.addEventListener('input', () => { preview[id] = slider.value / 100; updatePolicyPreview(n.def); });
+  };
+
+  function policyHTML(p) {
+    const st = S.policies[p.id];
+    const cat = catOf(p.id);
+    const lvl = preview[p.id] != null ? preview[p.id] : st ? st.level : 0.5;
+    return `
+      <div class="insp-head"><span class="chip" style="color:${cat.color}">${esc(cat.name)}</span>
+        <span class="chip" style="color:${st ? '#4ade80' : '#8a97ad'}">${st ? 'Active' : 'Not enacted'}</span></div>
+      <div class="insp-title">${esc(p.name)}</div>
+      <div class="desc">${esc(p.desc)}</div>
+      <div class="slider-box">
+        <div class="row"><span>Level</span><span class="m" id="lvlPct">${pct(lvl)}</span></div>
+        <input type="range" id="lvl" min="0" max="100" step="5" value="${Math.round(lvl * 100)}">
+        <div class="slider-ends"><span>${esc(p.lo)}</span><span>${esc(p.hi)}</span></div>
+        <div class="row" style="margin-top:8px"><span>Running cost</span><span class="m" id="lvlCost"></span></div>
+        <div class="row"><span>Bandwidth</span><span class="m" id="lvlBw"></span></div>
+        <div class="btn-row" id="polBtns"></div>
+        <div class="err" id="polErr"></div>
+      </div>
+      ${S.turnChanges[p.id] ? '<p class="note">Changed this quarter. Reverting to how it was is free.</p>' : ''}
+      <h3>Effects ${st ? '' : '(if enacted)'}</h3><div id="polEffects"></div>
+      ${p.special ? `<p class="note">${specialNote(p)}</p>` : ''}`;
+  }
+  function specialNote(p) {
+    const s = p.special, notes = [];
+    if (s.rivalBoost) notes.push('Rivals learn from this: every lab gains capability faster.');
+    if (s.rivalSlow) notes.push('Slows rival labs\' progress.');
+    if (s.computeDiscount) notes.push(`After 6 quarters, cuts all compute costs by up to ${pct(s.computeDiscount)}.`);
+    if (s.bandwidth) notes.push(`Adds up to +${s.bandwidth} bandwidth per quarter.`);
+    if (s.valuationHaircut) notes.push(`Cuts your valuation at funding rounds by up to ${pct(s.valuationHaircut)}.`);
+    if (s.pause) notes.push(`If capability gets ahead of safety (currently pauses above ${Math.round(E.pauseThreshold(S) === Infinity ? S.values.safety * 100 + 20 : E.pauseThreshold(S))}), scaling slows to a crawl.`);
+    return notes.join(' ');
+  }
+  function updatePolicyPreview(p) {
+    const st = S.policies[p.id];
+    const lvl = preview[p.id] != null ? preview[p.id] : st ? st.level : 0.5;
+    $('lvlPct').textContent = pct(lvl);
+    $('lvlCost').textContent = money(E.policyCost(S, p.id, lvl)) + ' / q';
+    const changed = !st || Math.abs(st.level - lvl) > 1e-9;
+    const bw = changed ? E.policyChangeCost(S, p.id, lvl) : 0;
+    $('lvlBw').textContent = bw < 0 ? `refund ${-bw}` : bw === 0 ? 'free' : `${bw} of ${S.bandwidth}`;
+    let btns = '';
+    if (!st) btns += `<button class="btn primary" data-action="apply" data-arg="${p.id}" ${bw > S.bandwidth || S.ended ? 'disabled' : ''}>Enact (${bw})</button>`;
+    else {
+      btns += `<button class="btn primary" data-action="apply" data-arg="${p.id}" ${!changed || bw > S.bandwidth || S.ended ? 'disabled' : ''}>Apply change${changed ? ` (${bw < 0 ? 'refund ' + -bw : bw})` : ''}</button>`;
+      const cc = E.policyChangeCost(S, p.id, null);
+      btns += `<button class="btn danger" data-action="cancel" data-arg="${p.id}" ${cc > S.bandwidth || S.ended ? 'disabled' : ''}>Cancel (${cc < 0 ? 'refund ' + -cc : cc})</button>`;
+    }
+    $('polBtns').innerHTML = btns;
+    const src = 0.2 + 0.8 * lvl;
+    $('polEffects').innerHTML = E.effectsFrom(p.id)
+      .sort((a, b) => Math.abs(b.k) - Math.abs(a.k))
+      .map((e) => effRow(e.to, e.k * E.curve(e.curve, src), lagTag(e.lag))).join('');
+  }
+
+  function statHTML(d, type) {
+    const id = d.id, v = S.values[id];
+    const big = id === 'capability' ? `${Math.floor(S.cap)}<small class="muted" style="font-size:14px"> / 100</small>` : pct(v);
+    let extra = '';
+    if (id === 'capability') {
+      extra = `<div class="row"><span>Gain last quarter</span><span class="m">+${(lastReport && lastReport.capGain || 0).toFixed(1)}</span></div>` +
+        S.rivals.map((r) => `<div class="row"><span style="color:${r.color}">${esc(r.name)}</span><span class="m">${Math.floor(r.cap)}</span></div>`).join('') +
+        `<p class="note">Capability grows each quarter with Research Velocity. Quality, hype, regulatory heat and the difficulty of alignment all rise with it.</p>` +
+        (S.policies.rsp ? `<p class="note">Your Responsible Scaling Policy pauses scaling above capability ${Math.round(E.pauseThreshold(S))}.</p>` : '');
+    } else if (id === 'runway') {
+      const rq = runwayQ();
+      extra = `<div class="row"><span>Quarters of cash</span><span class="m">${rq === Infinity ? 'Profitable' : rq.toFixed(1)}</span></div>`;
+    }
+    const hist = id === 'capability' ? S.history._cap : S.history[id];
+    return `
+      <div class="insp-head"><span class="chip" style="color:#7dd3fc">${type === 'indicator' ? 'Indicator' : 'Simulation value'}</span>
+        ${d.good === false ? '<span class="chip" style="color:#f87171">Lower is better</span>' : ''}</div>
+      <div class="insp-title">${esc(d.name)}</div>
+      <div class="big-num" style="color:${id === 'capability' ? '#e6ebf3' : statColor(id, v)}">${big}</div>
+      ${spark(hist, 300, 46, id === 'capability' ? { min: 0 } : { min: 0, max: 1, color: statColor(id, v) })}
+      <div class="desc">${esc(d.desc)}</div>${extra}
+      ${type === 'indicator' && id !== 'capability' ? '<p class="note">Computed directly from your finances and the race.</p>' : driversHTML(id)}
+      ${affectsHTML(id)}`;
+  }
+
+  function stakeholderHTML(d) {
+    const h = S.happiness[d.id];
+    return `
+      <div class="insp-head"><span class="chip" style="color:#fbbf24">Stakeholder</span><span class="chip" style="color:#8a97ad">Influence ${d.weight}</span></div>
+      <div class="insp-title">${esc(d.name)}</div>
+      <div class="big-num" style="color:${happyColor(h)}">${spct(h)}</div>
+      ${spark(S.history[d.id], 300, 46, { min: -1, max: 1, zero: 0, color: happyColor(h) })}
+      <div class="desc">${esc(d.desc)}</div>
+      ${driversHTML(d.id)}`;
+  }
+
+  function situationHTML(d) {
+    const on = !!S.active[d.id], p = S.pressure[d.id];
+    const col = d.good ? '#4ade80' : '#f87171';
+    return `
+      <div class="insp-head"><span class="chip" style="color:${col}">${d.good ? 'Opportunity' : 'Crisis'}</span>
+        <span class="chip" style="color:${on ? col : '#8a97ad'}">${on ? `Active ${S.active[d.id]} q` : 'Dormant'}</span></div>
+      <div class="insp-title">${esc(d.name)}</div>
+      <div class="desc">${esc(d.desc)}</div>
+      <div class="row"><span>Pressure</span><span class="m">${Math.round(p * 100)} (starts ${Math.round(d.on * 100)}, ends below ${Math.round(d.off * 100)})</span></div>
+      ${spark(S.history[d.id], 300, 40, { zero: d.on, color: col })}
+      ${driversHTML(d.id)}
+      <h3>Effects while active</h3>${d.e.map(([to, k]) => effRow(to, k)).join('')}
+      ${d.special && d.special.cost ? `<p class="note">Costs ${money(d.special.cost)}+ per quarter in legal fees.</p>` : ''}
+      ${d.special && d.special.rivalBoost ? '<p class="note">Rivals gain capability faster while this lasts.</p>' : ''}
+      ${d.id === 'injunction' ? '<p class="note">Three consecutive quarters of injunction ends the game.</p>' : ''}`;
+  }
+
+  function briefingHTML() {
+    const f = S.finance;
+    const maxItem = Math.max(f.revenue, ...f.items.map((i) => i.amount), 1);
+    const items = f.items.slice().sort((a, b) => b.amount - a.amount).map((i) => `
+      <div class="fin-row"><div>${esc(i.label)}<div class="bar" style="width:${(i.amount / maxItem) * 100}%;background:${i.color}"></div></div><span class="m">${money(i.amount)}</span></div>`).join('');
+    const sits = FL.SITUATIONS.filter((s) => S.active[s.id]);
+    const toRound = S.nextRound - S.turn;
+    const conf = E.investorConfidence(S);
+    const log = S.log.slice(-6).reverse().map((l) => `<li><span>${esc(l.text)}</span><span class="m muted">${E.quarterLabel(l.turn)}</span></li>`).join('');
+    return `
+      <div class="insp-title">Quarterly briefing</div>
+      <p class="note">Click any circle on the board to inspect it. Hover to see what drives what.</p>
+      <h3>This quarter (projected)</h3>
+      <div class="fin-row"><div>Revenue<div class="bar" style="width:${(f.revenue / maxItem) * 100}%;background:#4ade80"></div></div><span class="m pos">${money(f.revenue)}</span></div>
+      ${items}
+      <div class="fin-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px"><b>Net</b><span class="m ${f.net >= 0 ? 'pos' : 'neg'}">${money(f.net)}</span></div>
+      ${spark(S.history._cash, 300, 40, { color: '#7dd3fc', zero: 0 })}
+      <h3>Funding</h3>
+      <div class="row"><span>Next round</span><span class="m">${toRound <= 0 ? 'this quarter' : `in ${toRound} quarter${toRound > 1 ? 's' : ''}`}</span></div>
+      <div class="row"><span>Valuation now</span><span class="m">${money(S.valuation)}</span></div>
+      <div class="row"><span>Investor confidence</span><span class="m" style="color:${happyColor(conf)}">${spct(conf)}</span></div>
+      <p class="note">Rounds raise roughly 14% of valuation, more with confident investors. Below -35% confidence, the round collapses.</p>
+      <h3>Situations</h3>
+      ${sits.length ? sits.map((s) => `<span class="sit-tag ${s.good ? 'good' : 'bad'}" data-action="inspect" data-arg="${s.id}">${esc(s.name)}</span>`).join('') : '<p class="note">Nothing on fire. Enjoy it.</p>'}
+      ${log ? `<h3>Recent decisions</h3><ul class="rep-list">${log}</ul>` : ''}`;
+  }
+
+  // ── tooltip ──────────────────────────────────────────────
+  function tooltipText(id) {
+    const n = E.node(id);
+    const d = n.def;
+    if (n.type === 'policy') {
+      const st = S.policies[id];
+      return `<b>${esc(d.name)}</b>${st ? `Level ${pct(st.level)} · ${money(E.policyCost(S, id))}/q` : `Not enacted · ${d.intro} bandwidth`}`;
+    }
+    if (n.type === 'stakeholder') return `<b>${esc(d.name)}</b>Happiness ${spct(S.happiness[id])}`;
+    if (n.type === 'situation') return `<b>${esc(d.name)}</b>${esc(d.desc)}`;
+    if (id === 'capability') return `<b>Frontier Capability</b>${S.cap.toFixed(1)} / 100`;
+    return `<b>${esc(d.name)}</b>${pct(S.values[id])}`;
+  }
+
+  // ── modals ───────────────────────────────────────────────
+  function openModal(html) { $('modalCard').innerHTML = html; $('modal').classList.remove('hidden'); $('modalCard').scrollTop = 0; }
+  function closeModal() { $('modal').classList.add('hidden'); }
+
+  UI.showStart = function () {
+    const saved = loadSave();
+    const cards = FL.ARCHETYPES.map((a) => `
+      <button class="card ${a.id === pickedArch ? 'sel' : ''}" data-action="pickArch" data-arg="${a.id}">
+        <span class="diff ${a.difficulty}">${a.difficulty}</span><h4>${esc(a.name)}</h4>
+        <p>${esc(a.blurb)}</p>
+        <div class="meta">Cash ${money(a.cash)} · Bandwidth ${a.bandwidth} · Capability ${a.cap}</div>
+        <div class="meta">Starts with: ${Object.keys(a.policies).map(nameOf).join(', ')}</div>
+      </button>`).join('');
+    openModal(`
+      <h1>FRONTIER</h1>
+      <h2>Found a frontier AI lab. Race to AGI. Try not to end the world, go broke, or get fired by your own board.</h2>
+      ${saved && !saved.ended ? `<div class="callout"><b>${esc(saved.company)}</b> — ${E.quarterLabel(saved.turn)}, capability ${Math.floor(saved.cap)}.
+        <div class="btn-row"><button class="btn primary" data-action="continue">Continue saved game</button></div></div>` : ''}
+      <h3>Name your lab</h3>
+      <input class="name-input" id="coName" value="${esc((saved && saved.company) || 'Frontier Labs')}" maxlength="32">
+      <h3>Choose your origin story</h3>
+      <div class="cards">${cards}</div>
+      <div class="btn-row"><button class="btn primary big" data-action="found">Found the company</button>
+        <button class="btn big" data-action="help">How to play</button></div>`);
+  };
+
+  function helpHTML() {
+    return `<h1>How to play</h1>
+      <div class="howto">
+        <p><b>Each turn is a quarter.</b> You have ten years (40 quarters). Make changes, then press <i>End quarter</i>.</p>
+        <p><b>Policies</b> are the circles on the outer ring, grouped by category. Click one to enact it, set its slider, or cancel it. Dashed circles are not enacted.</p>
+        <p><b>Bandwidth</b> is your leadership attention: enacting, adjusting and cancelling policies cost it. You earn more each quarter, more if stakeholders approve of you. Changes made this quarter can be reverted for free.</p>
+        <p><b>Money.</b> Most policies cost cash every quarter. Revenue comes from adoption times monetization. Funding rounds happen every six quarters; the amount depends on valuation and investor confidence. Run out of cash and you are done.</p>
+        <p><b>The board</b> (middle ring) is a living simulation. Hover any circle to see what drives it (wires in) and what it drives (wires out). Green helps, red hurts. Effects take quarters to fully kick in.</p>
+        <p><b>Stakeholders</b> (inner ring and left panel) are your voter groups. Unhappy investors kill funding rounds. An unhappy board fires you.</p>
+        <p><b>Situations</b> appear in the middle when pressure builds: lawsuits, scandals, talent exodus, injunctions — or viral moments and frontier leadership.</p>
+        <p><b>Winning.</b> Reach capability 100 before your rivals. If safety maturity is high enough when you get there, you built aligned AGI. If not... Alignment gets harder as capability rises.</p>
+      </div>
+      <div class="btn-row"><button class="btn primary" data-action="${S ? 'closeModal' : 'start'}">Got it</button></div>`;
+  }
+
+  UI.showReport = function (r) {
+    lastReport = r;
+    const f = r.finance;
+    const deltas = r.deltas.slice(0, 9).map((d) => {
+      const better = (d.to - d.from) * (d.good === false ? -1 : 1) > 0;
+      return `<li><span>${esc(d.name)}</span><span class="m ${better ? 'pos' : 'neg'}">${Math.round(d.from * 100)} → ${Math.round(d.to * 100)}</span></li>`;
+    }).join('');
+    const sitLine = (ids, verb) => ids.map((id) => {
+      const s = E.node(id).def;
+      const cls = (verb === 'started') === s.good ? 'good' : 'bad';
+      return `<div class="callout ${cls}"><b>${esc(s.name)}</b> ${verb}. ${verb === 'started' ? esc(s.desc) : ''}</div>`;
+    }).join('');
+    openModal(`
+      <h2>${esc(S.company)}</h2>
+      <h1>${r.label} in review</h1>
+      ${r.funding ? `<div class="callout ${r.funding.ok ? 'good' : 'bad'}"><b>${r.funding.name}.</b> ${esc(r.funding.text)}</div>` : ''}
+      ${r.bridge ? `<div class="callout warn">${esc(r.bridge)}</div>` : ''}
+      ${sitLine(r.started, 'started')}${sitLine(r.ended, 'ended')}
+      ${r.warnings.map((w) => `<div class="callout bad">${esc(w)}</div>`).join('')}
+      <div class="rep-grid">
+        <div>
+          <h3>Finances</h3>
+          <ul class="rep-list">
+            <li><span>Revenue</span><span class="m pos">${money(f.revenue)}</span></li>
+            <li><span>Costs</span><span class="m neg">${money(f.costs)}</span></li>
+            <li><span>Net</span><span class="m ${f.net >= 0 ? 'pos' : 'neg'}">${money(f.net)}</span></li>
+            <li><span>Cash now</span><span class="m">${money(S.cash)}</span></li>
+            <li><span>Valuation</span><span class="m">${money(S.valuation)}</span></li>
+          </ul>
+          <h3>The race</h3>
+          <ul class="rep-list">
+            <li><span>Your capability</span><span class="m">${Math.floor(S.cap)} <span class="pos">(+${r.capGain.toFixed(1)})</span></span></li>
+            ${S.rivals.map((x) => `<li><span>${esc(x.name)}</span><span class="m">${Math.floor(x.cap)}</span></li>`).join('')}
+          </ul>
+          ${r.paused ? '<div class="callout warn">Your Responsible Scaling Policy kicked in: capability has outrun safety, so scaling slowed to a crawl.</div>' : ''}
+          ${r.news.map((n) => `<p class="note">${esc(n)}</p>`).join('')}
+        </div>
+        <div><h3>Biggest changes</h3><ul class="rep-list">${deltas || '<li class="muted">A quiet quarter.</li>'}</ul></div>
+      </div>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="afterReport">Continue</button></div>`);
+  };
+
+  UI.showDilemma = function () {
+    const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
+    if (!d) { S.pendingDilemma = null; return closeModal(); }
+    openModal(`
+      <h2>Decision required · ${E.quarterLabel(S.turn)}</h2>
+      <h1>${esc(d.title)}</h1>
+      <p class="lede">${esc(d.text)}</p>
+      <div class="cards">${d.options.map((o, i) => `
+        <button class="card" data-action="choose" data-arg="${i}"><h4>${esc(o.label)}</h4><p>${esc(o.desc)}</p>
+        ${o.cash ? `<div class="meta ${o.cash > 0 ? 'pos' : 'neg'}">${o.cash > 0 ? '+' : ''}${money(o.cash)}</div>` : ''}</button>`).join('')}
+      </div>`);
+  };
+
+  UI.showEnding = function (end) {
+    const H = S.history, n = H._cap.length;
+    const w = 640, h = 200;
+    const line = (arr, col, width) => `<polyline fill="none" stroke="${col}" stroke-width="${width}" points="${arr.map((v, i) => `${(i / Math.max(1, n - 1)) * w},${h - (Math.min(v, 105) / 105) * h}`).join(' ')}"/>`;
+    const chart = `<svg viewBox="0 0 ${w} ${h}" width="100%" style="background:#0d131e;border-radius:8px;margin:8px 0">
+      <line x1="0" x2="${w}" y1="${h - (100 / 105) * h}" y2="${h - (100 / 105) * h}" stroke="#fbbf24" stroke-dasharray="4 4"/>
+      ${S.rivals.map((r) => line(H['_rival_' + r.id], r.color, 1.5)).join('')}${line(H._cap, '#7dd3fc', 3)}
+      ${line(H.safety.map((v) => v * 100), '#f472b6', 2)}</svg>
+      <p class="note"><span style="color:#7dd3fc">You</span> · ${S.rivals.map((r) => `<span style="color:${r.color}">${esc(r.name)}</span>`).join(' · ')} · <span style="color:#f472b6">Your safety maturity</span> · <span style="color:#fbbf24">AGI</span></p>`;
+    openModal(`
+      <h2>${esc(S.company)} · ${E.quarterLabel(Math.min(S.turn, E.MAX_TURNS))}</h2>
+      <h1 class="${end.win ? 'pos' : 'neg'}">${esc(end.title)}</h1>
+      <p class="lede">${esc(end.text)}</p>
+      ${chart}
+      <ul class="rep-list">
+        <li><span>Score</span><span class="m">${E.score(S)}</span></li>
+        <li><span>Capability</span><span class="m">${Math.floor(S.cap)}</span></li>
+        <li><span>Safety maturity</span><span class="m">${pct(S.values.safety)}</span></li>
+        <li><span>Final valuation</span><span class="m">${money(S.valuation)}</span></li>
+        <li><span>Total raised</span><span class="m">${money(S.rounds.reduce((a, b) => a + b.raised, 0))} over ${S.rounds.length} rounds</span></li>
+      </ul>
+      <div class="btn-row"><button class="btn primary big" data-action="menu">New game</button><button class="btn big" data-action="closeModal">Look at the board</button></div>`);
+  };
+
+  // ── flow ─────────────────────────────────────────────────
+  UI.renderAll = function () {
+    UI.renderTopbar();
+    UI.renderLeft();
+    UI.renderBoard();
+    UI.inspect(selected);
+    if (selected && E.nodeType(selected) === 'policy') updatePolicyPreview(E.node(selected).def);
+  };
+
+  function startGame(state) {
+    S = state;
+    selected = null; hovered = null; preview = {}; lastReport = null;
+    closeModal();
+    UI.renderAll();
+    save();
+    if (S.ended) UI.showEnding(S.ended);
+    else if (S.pendingDilemma) UI.showDilemma();
+  }
+
+  const actions = {
+    inspect: (id) => { UI.inspect(id); UI.renderLeft(); applyHighlight(); if (E.nodeType(id) === 'policy') updatePolicyPreview(E.node(id).def); },
+    briefing: () => { selected = null; UI.renderAll(); },
+    help: () => openModal(helpHTML()),
+    start: () => UI.showStart(),
+    menu: () => UI.showStart(),
+    closeModal: () => closeModal(),
+    pickArch: (id) => { pickedArch = id; document.querySelectorAll('.card[data-action=pickArch]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
+    found: () => startGame(E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim())),
+    continue: () => startGame(loadSave()),
+    apply: (id) => {
+      const st = S.policies[id];
+      const lvl = preview[id] != null ? preview[id] : st ? st.level : 0.5;
+      const r = E.changePolicy(S, id, lvl);
+      if (!r.ok) { $('polErr').textContent = r.reason; return; }
+      delete preview[id];
+      S.finance = E.computeFinances(S);
+      S.log.push({ turn: S.turn, text: `${st ? 'Adjusted' : 'Enacted'} ${nameOf(id)} (${pct(lvl)})` });
+      save(); UI.renderAll();
+    },
+    cancel: (id) => {
+      const r = E.cancelPolicy(S, id);
+      if (!r.ok) { $('polErr').textContent = r.reason; return; }
+      delete preview[id];
+      S.finance = E.computeFinances(S);
+      S.log.push({ turn: S.turn, text: `Cancelled ${nameOf(id)}` });
+      save(); UI.renderAll();
+    },
+    endTurn: () => {
+      if (!S || S.ended) return;
+      preview = {};
+      const r = E.endTurn(S);
+      save();
+      UI.renderAll();
+      UI.showReport(r);
+    },
+    afterReport: () => {
+      if (S.ended) UI.showEnding(S.ended);
+      else if (S.pendingDilemma) UI.showDilemma();
+      else closeModal();
+    },
+    choose: (i) => {
+      const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
+      const res = E.resolveDilemma(S, +i);
+      S.finance = E.computeFinances(S);
+      S.valuation = E.valuation(S);
+      save();
+      UI.renderAll();
+      openModal(`<h2>${esc(d ? d.title : '')}</h2><h1>${esc(d ? d.options[+i].label : '')}</h1><p class="lede">${esc(res.text)}</p>
+        <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="closeModal">Continue</button></div>`);
+    },
+  };
+
+  UI.init = function () {
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-action]');
+      if (el) { actions[el.dataset.action](el.dataset.arg, el); return; }
+    });
+    const svg = $('board'), tip = $('tooltip');
+    svg.addEventListener('mousemove', (e) => {
+      const n = e.target.closest('.node');
+      const id = n ? n.dataset.id : null;
+      if (id !== hovered) { hovered = id; applyHighlight(); }
+      if (id && S) {
+        tip.innerHTML = tooltipText(id);
+        tip.classList.remove('hidden');
+        const box = $('boardWrap').getBoundingClientRect();
+        let x = e.clientX - box.left + 14, y = e.clientY - box.top + 14;
+        if (x + 270 > box.width) x -= 290;
+        tip.style.left = x + 'px'; tip.style.top = y + 'px';
+      } else tip.classList.add('hidden');
+    });
+    svg.addEventListener('mouseleave', () => { hovered = null; tip.classList.add('hidden'); applyHighlight(); });
+    svg.addEventListener('click', (e) => {
+      if (!S) return;
+      const n = e.target.closest('.node');
+      if (n) actions.inspect(n.dataset.id);
+      else { selected = null; UI.renderAll(); }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('modal').classList.contains('hidden') && S && !S.pendingDilemma && !S.ended) closeModal();
+      else if (e.key === 'Escape' && S) { selected = null; UI.renderAll(); }
+    });
+
+    const saved = loadSave();
+    if (saved && !saved.ended) {
+      S = saved;
+      UI.renderAll();
+    }
+    UI.showStart();
+  };
 
   FL.UI = UI;
 })(globalThis.FL = globalThis.FL || {});

@@ -400,7 +400,15 @@
 
   // ── Dilemmas ─────────────────────────────────────────────
   E.rollDilemma = function (state) {
-    if (state.pendingDilemma || E.rand(state) > 0.45) return null;
+    if (state.pendingDilemma) return null;
+    const restless = FL.DILEMMAS.find((d) => d.id === 'boardRevolt');
+    const lastRevolt = state.dilemmaSeen.boardRevolt;
+    if (restless && state.happiness.board < -0.3 && (lastRevolt == null || state.turn - lastRevolt >= 4)) {
+      state.pendingDilemma = restless.id;
+      state.dilemmaSeen[restless.id] = state.turn;
+      return restless.id;
+    }
+    if (E.rand(state) > 0.45) return null;
     const eligible = FL.DILEMMAS.filter((d) => {
       const seen = state.dilemmaSeen[d.id];
       if (seen != null && (d.once || state.turn - seen < 8)) return false;
@@ -453,7 +461,7 @@
   E.checkEnding = function (state) {
     const s = state.values.safety;
     if (state.cap >= E.AGI) {
-      if (s >= 0.58) return { id: 'aligned', win: true, title: 'Aligned AGI', text: `${state.company} built the first AGI — and it is on humanity's side. Safety maturity of ${Math.round(s * 100)}% held when it mattered. The hardest part starts now, but you got the beginning right.` };
+      if (s >= 0.55) return { id: 'aligned', win: true, title: 'Aligned AGI', text: `${state.company} built the first AGI — and it is on humanity's side. Safety maturity of ${Math.round(s * 100)}% held when it mattered. The hardest part starts now, but you got the beginning right.` };
       if (s >= 0.40) return { id: 'uneasy', win: true, title: 'Uneasy Victory', text: `${state.company} reached AGI first. It mostly does what you want. Mostly. With ${Math.round(s * 100)}% safety maturity, nobody on the alignment team is sleeping well.` };
       return { id: 'misaligned', win: false, title: 'Misaligned', text: `${state.company} reached AGI first with only ${Math.round(s * 100)}% safety maturity. For a few weeks it was the most valuable company in history. Then the model's goals and yours stopped overlapping.` };
     }
@@ -517,7 +525,7 @@
 
     if (state.cash < 0) {
       if (!state.bridgeUsed && E.investorConfidence(state) > -0.4) {
-        const amt = Math.max(-state.cash + 200, E.valuation(state) * 0.06);
+        const amt = Math.max(-state.cash + 2 * Math.max(0, -state.finance.net), E.valuation(state) * 0.08);
         state.cash += amt;
         state.bridgeUsed = true;
         state.shocks.push({ to: 'board', amt: -0.3, turns: 6, left: 6 });
@@ -528,8 +536,8 @@
 
     if (state.happiness.board < -0.45) {
       state.badBoardTurns++;
-      if (E.rand(state) < 0.2 + 0.15 * state.badBoardTurns) state.flags.ousted = true;
-      else report.warnings.push('The board is openly discussing replacing you.');
+      if (state.badBoardTurns >= 2 && E.rand(state) < 0.35 + 0.15 * (state.badBoardTurns - 2)) state.flags.ousted = true;
+      else report.warnings.push('The board is openly discussing replacing you. Win them back fast: runway, regulators and lawsuits are what they care about.');
     } else state.badBoardTurns = 0;
     if (state.active.injunction) {
       state.injunctionTurns++;
