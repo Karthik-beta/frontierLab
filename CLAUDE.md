@@ -11,19 +11,25 @@ When the user wants help playing (e.g. "help me with this quarter", "what should
    server in the background (`node tools/serve.js`) and ask the user to open
    http://localhost:4747 (or run `./frontier open`). A green "CLI connected" pill shows
    in the bottom-left of the game when it's linked.
-2. Read the state: `./frontier status` (add `--json` for structured data),
-   `./frontier report`, `./frontier risks`, `./frontier inspect <thing>`,
+2. Read the state: `./frontier status` (add `--json` for structured data), `./frontier inbox`,
+   `./frontier news`, `./frontier risks`, `./frontier inspect <thing>`,
    `./frontier fleet`, `./frontier deals`, `./frontier candidates`, `./frontier team`.
+   The game runs in **real time**: decisions in the inbox expire to their default, and the clock
+   keeps running while you think. `./frontier wait <weeks>` lets time pass; `./frontier speed <x>`
+   changes pace (0 pauses, single-player only).
+   You get the same fog the player gets: rival capabilities are estimates, safety is an eval
+   estimate, and effects are qualitative. There is no hidden "correct" build to look up — every
+   run has a different hidden world. Reason from evidence and say how sure you are.
 3. Advise like a chief of staff: explain *why* things are moving (use `inspect` to show
    drivers), flag risks and deadlines, and give a recommendation with its tradeoffs.
    Put a short version in the game with `./frontier say "<advice>"`; it appears in the
    Chief of staff panel.
-4. Do not take actions (`enact`, `set`, `cancel`, `offer`, `accept`, `choose`, `end`, ...)
+4. Do not take actions (`enact`, `set`, `cancel`, `offer`, `accept`, `decide`, `speed`, ...)
    unless the user asks you to. If they say "play for me" or "do it", act, then say what
    you did.
-5. Stay spoiler-light by default: use what the game shows (status, inspect, risks). Don't
-   read `js/data/*` to reveal hidden pitfall meters, hidden traits or event odds unless the
-   user asks for spoilers.
+5. Play fair: use only what the game shows (status, inspect, risks, inbox). Don't read the
+   source or `localStorage` to reveal the hidden world, true rival capabilities, true safety,
+   pitfall meters or event odds — unless the user explicitly asks you to cheat.
 
 `./frontier help` lists every command. Policy and stat names match fuzzily
 (`./frontier enact "consumer app" 60`). Levels are 0-100.

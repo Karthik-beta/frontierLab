@@ -1,19 +1,17 @@
-/* multiplayer.js — lobbies and the shared race (no DOM here; the UI subscribes to events).
+/* multiplayer.js — lobbies and the shared real-time race (no DOM here; the UI subscribes to events).
  *
- * Each player simulates their own lab in their own browser. The host runs the lobby and a turn
- * barrier: when every active human has ended the quarter, the host plays the bot seats and
- * broadcasts "advance"; every client then runs its quarter and reports a public snapshot
- * (capability, valuation, headline, ending), which other players see as rival labs.
- * First to capability 100 wins; everyone else gets Second Place.
+ * Every lab's simulation runs continuously in its owner's browser. The host's game clock is the
+ * shared clock: the host broadcasts its week and speed about once a second and guests follow it.
+ * Labs only exchange public information — last released model generation, valuation, headline —
+ * which other players see as foggy rival labs. First to capability 100 wins; everyone else gets
+ * Second Place. The host also runs any AI lab seats.
  *
- * Real time (default): the host's clock advances a quarter every `secondsPerQuarter`; if every human
- * presses Ready first, the quarter advances early. Turn-based mode waits for everyone.
- * Events: 'change' (lobby updated), 'start' (lobby), 'advance' (turn), 'clock' ({turn, deadline, paused}),
- *         'snaps', 'chat', 'ended', 'error', 'hostLeft'. */
+ * Events: 'change' (lobby updated), 'start' (lobby), 'clock' ({week, speed}), 'snaps', 'chat',
+ *         'ended', 'error', 'hostLeft'. */
 (function (FL) {
   'use strict';
   const E = FL.Engine;
-  const MP = { conn: null, lobby: null, myId: null, bots: {} };
+  const MP = { conn: null, lobby: null, myId: null, bots: {}, clock: { week: 0, speed: 1, at: 0 } };
   const listeners = {};
   const COLORS = ['#f472b6', '#fbbf24', '#a3e635', '#c084fc', '#22d3ee', '#fb923c', '#e879f9', '#93c5fd'];
   const BOT_NAMES = ['Ouroboros AI', 'Paperclip Partners', 'Basilisk Labs', 'Tensor & Sons', 'Gradient Ascent Inc', 'Moat Capital AI'];
@@ -28,8 +26,8 @@
 
   function newPlayer(id, profile, extra) {
     const arch = FL.ARCHETYPES.find((a) => a.id === profile.archetype) || FL.ARCHETYPES[0];
-    return Object.assign({ id, name: profile.name || 'Player', company: profile.company || 'Unnamed Lab', archetype: arch.id, ready: false, connected: true,
-      cap: arch.cap, valuation: 0, headline: '', ended: null }, extra || {});
+    return Object.assign({ id, name: profile.name || 'Player', company: profile.company || 'Unnamed Lab', archetype: arch.id, connected: true,
+      cap: Math.floor(arch.cap / 10) * 10, valuation: 0, headline: '', ended: null }, extra || {});
   }
   const publicLobby = () => JSON.parse(JSON.stringify(MP.lobby));
   function assignColors() { MP.lobby.players.forEach((p, i) => (p.color = COLORS[i % COLORS.length])); }
@@ -42,19 +40,15 @@
     let p = L.players.find((x) => x.id === from);
     switch (msg.type) {
       case 'hello':
-        if (L.started && !p) { MP.conn.send({ type: 'error', error: 'That match has already started.' }, from); return; }
-        if (!p) { p = newPlayer(from, msg.profile); L.players.push(p); } else { Object.assign(p, newPlayer(from, msg.profile), { connected: true }); }
+        if (L.started && !p) { MP.conn.send({ type: 'error', error: 'That race has already started.' }, from); return; }
+        if (!p) { p = newPlayer(from, msg.profile); L.players.push(p); } else Object.assign(p, newPlayer(from, msg.profile), { connected: true });
         broadcastLobby();
-        if (L.started) MP.conn.send({ type: 'start', lobby: publicLobby() }, from);
         break;
       case 'profile':
         if (p && !L.started) { Object.assign(p, newPlayer(from, msg.profile)); broadcastLobby(); }
         break;
-      case 'ready':
-        if (p && msg.turn === L.turn) { p.ready = true; broadcastLobby(); checkBarrier(); }
-        break;
       case 'snap':
-        if (p) { Object.assign(p, msg.snap); MP.conn.send({ type: 'snaps', players: L.players }); emit('snaps', L.players); }
+        if (p) { Object.assign(p, msg.snap); MP.conn.send({ type: 'snaps', players: L.players }); emit('snaps', L.players); emit('change', L); }
         break;
       case 'chat':
         relayChat({ from: p ? p.name : '?', company: p ? p.company : '', text: String(msg.text).slice(0, 300) });
@@ -73,8 +67,8 @@
     MP.leave();
     MP.conn = await FL.Net.host(opts.kind || 'internet');
     MP.myId = MP.conn.myId;
-    MP.lobby = { code: MP.conn.code, kind: MP.conn.kind, settings: { difficulty: opts.difficulty || 'normal', aiRivals: true, mode: 'realtime', secondsPerQuarter: 45 }, players: [newPlayer(MP.myId, opts, { host: true })],
-      started: false, turn: 1, seed: Math.floor(Math.random() * 1e9), chat: [] };
+    MP.lobby = { code: MP.conn.code, kind: MP.conn.kind, settings: { difficulty: opts.difficulty || 'normal', aiRivals: true, speed: 1 },
+      players: [newPlayer(MP.myId, opts, { host: true })], started: false, seed: Math.floor(Math.random() * 1e9), chat: [] };
     MP.conn.onMessage(hostHandle);
     MP.conn.onPeer((id, ev) => {
       if (ev !== 'leave') return;
@@ -83,7 +77,6 @@
       if (MP.lobby.started) p.connected = false;
       else MP.lobby.players = MP.lobby.players.filter((x) => x !== p);
       broadcastLobby();
-      checkBarrier();
     });
     assignColors();
     emit('change', MP.lobby);
@@ -91,9 +84,10 @@
   };
 
   MP.setSettings = function (settings) {
-    if (!MP.isHost() || MP.lobby.started) return;
+    if (!MP.isHost()) return;
     Object.assign(MP.lobby.settings, settings);
     broadcastLobby();
+    if (MP.active()) MP.broadcastClock(MP.clock.week);
   };
 
   MP.addBot = function () {
@@ -114,87 +108,45 @@
     const L = MP.lobby;
     if (L.players.length < 2) { emit('error', 'Add at least one more player or an AI lab first.'); return; }
     L.started = true;
-    L.turn = 1;
-    L.players.forEach((p, i) => {
-      p.ready = false;
-      if (p.bot) {
-        const s = E.newGame(p.archetype, p.company, L.seed + i * 7919, L.settings.difficulty);
-        MP.bots[p.id] = s;
-      }
-    });
+    L.players.forEach((p, i) => { if (p.bot) MP.bots[p.id] = E.newGame(p.archetype, p.company, L.seed + i * 7919, L.settings.difficulty); });
     Object.keys(MP.bots).forEach((id) => setupRivals(MP.bots[id], id));
+    MP.clock = { week: 0, speed: L.settings.speed, at: Date.now() };
     broadcastLobby();
     MP.conn.send({ type: 'start', lobby: publicLobby() });
     emit('start', L);
-    scheduleClock();
   };
 
-  // ── Real-time clock (host-owned) ─────────────────────────
-  let clockTimer = null;
-  function scheduleClock() {
-    clearTimeout(clockTimer);
-    const L = MP.lobby;
-    if (!L || !L.started || L.settings.mode !== 'realtime' || L.paused) { broadcastClock(); return; }
-    const ms = (L.msLeft != null ? L.msLeft : L.settings.secondsPerQuarter * 1000);
-    L.msLeft = null;
-    L.deadline = Date.now() + ms;
-    clockTimer = setTimeout(() => advanceNow(), ms);
-    broadcastClock();
-  }
-  function broadcastClock() {
-    const L = MP.lobby;
-    const msLeft = L.paused ? L.msLeft : L.deadline ? Math.max(0, L.deadline - Date.now()) : null;
-    MP.conn.send({ type: 'clock', turn: L.turn, msLeft, paused: !!L.paused, mode: L.settings.mode });
-    emit('clock', { turn: L.turn, deadline: msLeft != null ? Date.now() + msLeft : null, paused: !!L.paused, msLeft });
-  }
-  MP.setPaused = function (paused) {
-    const L = MP.lobby;
-    if (!MP.isHost() || !L || !L.started || L.settings.mode !== 'realtime') return;
-    if (paused && !L.paused) { L.msLeft = Math.max(0, L.deadline - Date.now()); L.paused = true; clearTimeout(clockTimer); broadcastClock(); }
-    else if (!paused && L.paused) { L.paused = false; scheduleClock(); }
-  };
-
-  /** When every connected, still-playing human is ready, play the bots and advance. */
-  function checkBarrier() {
-    const L = MP.lobby;
-    if (!L || !L.started) return;
-    const waiting = L.players.filter((p) => !p.bot && p.connected && !p.ended && !p.ready);
-    if (waiting.length) return;
-    advanceNow();
-  }
-
-  /** Play the bot seats and move everyone to the next quarter. */
-  function advanceNow() {
-    const L = MP.lobby;
-    if (!L || !L.started) return;
-    clearTimeout(clockTimer);
-    for (const p of L.players.filter((x) => x.bot && !x.ended)) {
+  /** Host: advance the AI labs in lockstep with the host's own lab. */
+  MP.hostTickBots = function (week) {
+    if (!MP.isHost() || !MP.active()) return;
+    for (const p of MP.lobby.players.filter((x) => x.bot && !x.ended)) {
       const s = MP.bots[p.id];
-      MP.applySnapshots(s, p.id);
-      if (s.ended) continue;
-      FL.Bots.adaptive(s);
-      E.endTurn(s);
-      while (s.pendingDilemma && !s.ended) FL.Bots.decide(s);
-      Object.assign(p, snapshotOf(s));
+      while (s.week < week && !s.ended) {
+        if (s.week % 4 === 0) { MP.applySnapshots(s, p.id); FL.Bots.adaptive(s); }
+        E.tick(s);
+        while (s.pendingDilemma && !s.ended) FL.Bots.decide(s);
+      }
+      const snap = snapshotOf(s);
+      if (snap.cap !== p.cap || (snap.ended && !p.ended)) { Object.assign(p, snap); MP.conn.send({ type: 'snaps', players: MP.lobby.players }); emit('snaps', MP.lobby.players); emit('change', MP.lobby); }
     }
-    L.turn++;
-    L.players.forEach((p) => (p.ready = false));
-    MP.conn.send({ type: 'advance', turn: L.turn, players: L.players });
-    emit('advance', L.turn);
-    emit('change', L);
-    if (L.players.some((p) => !p.bot && !p.ended)) scheduleClock();
-  }
+  };
+
+  /** Host: share the clock about once a second. */
+  MP.broadcastClock = function (week) {
+    if (!MP.isHost() || !MP.active()) return;
+    MP.clock = { week, speed: MP.lobby.settings.speed, at: Date.now() };
+    MP.conn.send({ type: 'clock', week, speed: MP.lobby.settings.speed });
+  };
 
   // ── Guest ────────────────────────────────────────────────
   function guestHandle(msg) {
     switch (msg.type) {
       case 'lobby': MP.lobby = msg.lobby; emit('change', MP.lobby); break;
-      case 'start': MP.lobby = msg.lobby; emit('start', MP.lobby); break;
-      case 'advance': MP.lobby.turn = msg.turn; MP.lobby.players = msg.players; emit('advance', msg.turn); emit('change', MP.lobby); break;
+      case 'start': MP.lobby = msg.lobby; MP.clock = { week: 0, speed: msg.lobby.settings.speed, at: Date.now() }; emit('start', MP.lobby); break;
       case 'snaps': MP.lobby.players = msg.players; emit('snaps', msg.players); emit('change', MP.lobby); break;
+      case 'clock': MP.clock = { week: msg.week, speed: msg.speed, at: Date.now() }; emit('clock', MP.clock); break;
       case 'chat': MP.lobby.chat.push(msg.line); emit('chat', msg.line); break;
       case 'error': emit('error', msg.error); break;
-      case 'clock': MP.lobby.turn = msg.turn; MP.lobby.paused = msg.paused; emit('clock', { turn: msg.turn, deadline: msg.msLeft != null ? Date.now() + msg.msLeft : null, paused: msg.paused, msLeft: msg.msLeft }); break;
     }
   }
 
@@ -202,11 +154,17 @@
     MP.leave();
     MP.conn = await FL.Net.join(opts.kind || 'internet', code);
     MP.myId = MP.conn.myId;
-    MP.lobby = { code: MP.conn.code, kind: MP.conn.kind, players: [], settings: {}, started: false, turn: 1, chat: [] };
+    MP.lobby = { code: MP.conn.code, kind: MP.conn.kind, players: [], settings: {}, started: false, chat: [] };
     MP.conn.onMessage(guestHandle);
     MP.conn.onPeer((id, ev) => { if (ev === 'leave') emit('hostLeft'); });
     MP.conn.send({ type: 'hello', profile: opts });
     return MP.lobby;
+  };
+
+  /** Guests: the week the host's clock should be at right now. */
+  MP.targetWeek = function (weekMs) {
+    const c = MP.clock;
+    return c.week + (Date.now() - c.at) / (weekMs / Math.max(0.001, c.speed));
   };
 
   MP.setProfile = function (profile) {
@@ -222,7 +180,6 @@
   };
 
   // ── Both ─────────────────────────────────────────────────
-  /** Create this player's company for the match. */
   MP.makeGame = function () {
     const L = MP.lobby, me = MP.me();
     const i = L.players.indexOf(me);
@@ -238,7 +195,7 @@
     MP.applySnapshots(s, selfId);
   }
 
-  /** Mirror other players into this company's rival list; if one reached AGI, the race is over. */
+  /** Mirror other players into this company's rival list (public info only). */
   MP.applySnapshots = function (s, selfId) {
     if (!MP.lobby) return;
     selfId = selfId || MP.myId;
@@ -257,36 +214,24 @@
     }
   };
 
+  /** Only public information leaves your browser: your last released model generation. */
   function snapshotOf(s) {
-    const h = (s.history._cap || []).length;
-    // Only public information leaves your browser: your last released model generation.
-    return { cap: s.cap >= E.AGI ? s.cap : Math.floor(s.cap / 10) * 10, valuation: s.valuation, quarter: E.quarterLabel(s.turn), headline: (s._lastHeadline || ''), ended: s.ended ? { id: s.ended.id, title: s.ended.title, win: s.ended.win } : null, turns: h };
+    return { cap: s.cap >= E.AGI ? s.cap : Math.floor(s.cap / 10) * 10, valuation: s.valuation, quarter: E.quarterLabel(s.turn), headline: s._lastHeadline || '',
+      ended: s.ended ? { id: s.ended.id, title: s.ended.title, win: s.ended.win } : null };
   }
 
-  /** Called by the UI after this player's quarter has been played. */
-  MP.sendSnap = function (s, report) {
+  /** Called from the UI loop: send a snapshot when something public changed. */
+  MP.maybeSnap = function (s) {
     if (!MP.active()) return;
-    if (report && report.headline) s._lastHeadline = report.headline.head;
     const snap = snapshotOf(s);
     const me = MP.me();
-    if (MP.isHost()) { Object.assign(me, snap); MP.conn.send({ type: 'snaps', players: MP.lobby.players }); emit('snaps', MP.lobby.players); emit('change', MP.lobby); }
+    if (!me || (me.cap === snap.cap && !!me.ended === !!snap.ended && me.headline === snap.headline)) return;
+    Object.assign(me, snap);
+    if (MP.isHost()) { MP.conn.send({ type: 'snaps', players: MP.lobby.players }); emit('snaps', MP.lobby.players); emit('change', MP.lobby); }
     else MP.conn.send({ type: 'snap', snap });
   };
 
-  /** This player has finished their quarter's decisions. */
-  MP.ready = function () {
-    if (!MP.active()) return;
-    const L = MP.lobby;
-    if (MP.isHost()) { MP.me().ready = true; broadcastLobby(); checkBarrier(); }
-    else { MP.me() && (MP.me().ready = true); MP.conn.send({ type: 'ready', turn: L.turn }); emit('change', L); }
-  };
-
-  MP.waitingFor = () => (MP.lobby ? MP.lobby.players.filter((p) => !p.bot && p.connected && !p.ended && !p.ready) : []);
-
-  MP.realtime = () => !!(MP.lobby && MP.lobby.settings && MP.lobby.settings.mode === 'realtime');
-
   MP.leave = function () {
-    clearTimeout(clockTimer);
     if (MP.conn) try { MP.conn.close(); } catch (e) { /* ignore */ }
     MP.conn = null; MP.lobby = null; MP.myId = null; MP.bots = {};
     emit('change', null);

@@ -19,16 +19,14 @@
   const SHARE_URL = 'https://g8r-b8.github.io/frontierLab/';
   const joinPrefill = (() => { try { const q = new URLSearchParams(location.search); return { code: q.get('join') || '', kind: q.get('net') || 'internet' }; } catch (e) { return {}; } })();
   let mpEndResolve = null;
-  let pickedPace = 'turns';
-  const PACES = [{ id: 'turns', name: 'Turn-based', secs: 0, blurb: 'Take as long as you like each quarter.' },
-    { id: 'slow', name: 'Real-time: slow', secs: 60, blurb: 'A quarter every 60 seconds.' },
-    { id: 'normal', name: 'Real-time: normal', secs: 40, blurb: 'A quarter every 40 seconds.' },
-    { id: 'fast', name: 'Real-time: fast', secs: 20, blurb: 'A quarter every 20 seconds. Good luck.' }];
-  const clock = { deadline: null, msLeft: null, paused: false };
-  let mpClock = { deadline: null, paused: false };
+  const WEEK_MS = 2000; // one game week per 2 real seconds at 1x
+  const SPEEDS = [0, 0.5, 1, 2, 4];
+  let speed = 1;
+  let loopAcc = 0, lastFrame = 0, lastClockSent = 0, lastSave = 0, ticksSinceInspect = 0;
+  let decisionResults = []; // recent outcomes shown under the inbox
+  
   const HW = FL.Hardware, HR = FL.Hiring;
   let lastReport = null;
-  let celebrations = [];
   let busy = false;
   let endingShown = false;
 
@@ -156,6 +154,9 @@
     });
   };
 
+  /** What the player can see for a stat (fogged where measurement is uncertain). */
+  const shown = (id) => (FL.Fog.FOGGY.includes(id) ? FL.Fog.measured(S, id).est : S.values[id]);
+
   function arcPath(r, a0, a1, reverse) {
     const p = (a) => `${(r * Math.cos(a)).toFixed(1)} ${(r * Math.sin(a)).toFixed(1)}`;
     const large = a1 - a0 > Math.PI ? 1 : 0;
@@ -193,11 +194,11 @@
         `<text class="abbr">${ABBR[p.id]}</text></g>`);
     }
     for (const id of STAT_ORDER) {
-      const q = pos[id], v = S.values[id], col = statColor(id, v);
+      const q = pos[id], v = shown(id), col = statColor(id, v);
       out.push(`<g class="node stat" data-id="${id}" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})">` +
         ring(q.r + 4, v, col, 4) +
         `<circle class="body" r="${q.r}" fill="#101724" stroke="#2a3549" stroke-width="1"/>` +
-        `<text class="val" fill="${col}">${Math.round(v * 100)}</text>` +
+        `<text class="val" fill="${col}">${FL.Fog.FOGGY.includes(id) ? '~' : ''}${Math.round(v * 100)}</text>` +
         `<text class="lbl" y="${q.r + 18}">${esc(nameOf(id))}</text></g>`);
     }
     for (const s of FL.STAKEHOLDERS) {
@@ -266,12 +267,12 @@
     const toRound = S.nextRound - S.turn;
     $('topbar').innerHTML = `
       <div class="brand">FRONTIER<small>${esc(S.company)}</small></div>
-      <div class="kpi"><span class="k">Quarter</span><span class="v">${E.quarterLabel(S.turn)}</span></div>
+      <div class="kpi"><span class="k">Date</span><span class="v">${E.quarterLabel(S.turn)} <small class="muted">wk ${E.weekOfQuarter(S) + 1}</small></span></div>
       <div class="kpi"><span class="k">Cash</span><span class="v ${S.cash < 0 ? 'neg' : ''}">${money(S.cash)}</span></div>
       <div class="kpi"><span class="k">Net / quarter</span><span class="v ${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${money(net)}</span></div>
       <div class="kpi"><span class="k">Runway</span><span class="v ${rq < toRound + 1 ? 'neg' : rq < toRound + 3 ? 'warn' : ''}">${rq === Infinity ? 'Profitable' : rq.toFixed(1) + ' q'}</span></div>
       <div class="kpi" title="Next funding round ${toRound <= 0 ? 'this quarter' : 'in ' + toRound + ' quarters'}"><span class="k">Valuation · round ${toRound <= 0 ? 'now' : 'in ' + toRound + 'q'}</span><span class="v">${money(S.valuation)}</span></div>
-      <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
+      <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${Math.floor(S.bandwidth)} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
       <button class="btn" data-action="marketingMenu">Marketing${S.mkt && S.mkt.booked.length ? ` <b class="pos">${S.mkt.booked.length}</b>` : ''}</button>
@@ -280,10 +281,17 @@
       <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b></button>
       <button class="btn" data-action="gameMenu">Menu</button>
       ${MP.active() ? `<button class="btn" data-action="mpLobby" title="Lobby and chat">Lobby ${esc(MP.lobby.code)}</button>` : ''}
-      ${MP.active() && MP.me() && MP.me().ready && !S.ended
-        ? `<button class="btn big" disabled>Waiting for ${MP.waitingFor().length}…</button>`
-        : `<button class="btn primary big" data-action="endTurn" ${S.ended ? 'disabled' : ''}>${MP.active() ? (MP.realtime() ? 'Ready (skip ahead)' : 'Ready') : 'End quarter'}</button>`}`;
+      ${speedControls()}`;
   };
+
+  function speedControls() {
+    const cur = MP.active() ? (MP.lobby.settings.speed || 1) : speed;
+    const canSet = !MP.active() || MP.isHost();
+    const opts = MP.active() ? SPEEDS.filter((v) => v > 0) : SPEEDS;
+    return `<div class="speed" title="${MP.active() ? (canSet ? 'You set the pace for everyone' : 'The host sets the pace') : 'Space pauses; 1-4 set speed'}">${opts.map((v) =>
+      `<button class="btn ${v === cur ? 'on' : ''}" data-action="setSpeed" data-arg="${v}" ${canSet ? '' : 'disabled'}>${v === 0 ? 'II' : v + 'x'}</button>`).join('')}
+      <div class="qbar" title="Progress through the quarter"><span id="qprog" style="width:${(E.weekOfQuarter(S) / E.TICKS_PER_Q) * 100}%"></span></div></div>`;
+  }
 
   UI.renderLeft = function () {
     const rows = FL.STAKEHOLDERS.slice().sort((a, b) => b.weight - a.weight).map((s) => {
@@ -296,9 +304,14 @@
     }).join('');
     const appr = E.approval(S);
     const conf = E.investorConfidence(S);
-    const racers = [{ name: 'You', cap: S.cap, color: '#7dd3fc' }].concat(S.rivals).sort((a, b) => b.cap - a.cap);
-    const race = racers.map((r) => `<div class="race-row"><div class="lbl"><span>${esc(r.name)}${r.player ? ` <span class="muted">· ${esc(r.player)}</span>` : ''}</span><b>${Math.floor(r.cap)}</b></div>
-      <div class="rbar"><span style="width:${Math.min(100, r.cap)}%;background:${r.color}"></span></div></div>`).join('');
+    const racers = [{ name: 'You', est: S.cap, sd: 0, color: '#7dd3fc' }].concat(S.rivals.map((r) => { const e = FL.Fog.rivalEstimate(S, r); return { name: r.name, est: e.est, sd: e.sd, color: r.color, player: r.player, source: e.source, age: e.age }; }))
+      .sort((a, b) => b.est - a.est);
+    const race = racers.map((r) => {
+      const lo = Math.max(0, r.est - 1.6 * r.sd), hi = Math.min(105, r.est + 1.6 * r.sd);
+      return `<div class="race-row" title="${r.sd ? `Estimate from ${esc(r.source)}${r.age > 0.2 ? `, ${Math.round(r.age * 13)} weeks ago` : ''}` : 'Your own lab'}"><div class="lbl"><span>${esc(r.name)}${r.player ? ` <span class="muted">· ${esc(r.player)}</span>` : ''}</span>
+        <b>${r.sd ? `~${Math.round(r.est)} <small class="muted">±${Math.round(1.6 * r.sd)}</small>` : Math.floor(r.est)}</b></div>
+        <div class="rbar">${r.sd ? `<i class="range" style="left:${lo}%;width:${hi - lo}%;background:${r.color}"></i>` : ''}<span style="width:${Math.min(100, r.est)}%;background:${r.color};${r.sd ? 'opacity:.55' : ''}"></span></div></div>`;
+    }).join('');
     const board = S.happiness.board;
     const objs = S.objectives.map((o) => {
       const p = Sys.objectiveProgress(S, o), left = o.deadline - S.turn;
@@ -322,53 +335,50 @@
       <div class="approval" style="border-top:0;margin-top:0;padding-top:0"><span>Investor confidence</span><b style="color:${happyColor(conf)}">${spct(conf)}</b></div>
       ${board < -0.3 ? `<div class="callout bad">The board is at ${spct(board)}. Below -45% they may fire you.</div>` : ''}
       <h3>The race to AGI</h3>${race}
-      <p class="note">First to 100 wins the race. What happens next depends on your safety maturity (${pct(S.values.safety)} now).</p>`;
+      <p class="note">Rivals are estimates from public releases, leaks and intel; the bands widen the longer you go without news. First to 100 wins. What happens next depends on your safety — which you can only measure through evals (~${pct(FL.Fog.measured(S, 'safety').est)} ±${Math.round(160 * FL.Fog.measured(S, 'safety').sd)}).</p>`;
   };
 
   // ── inspector ────────────────────────────────────────────
-  function effRow(target, val, extra, k) {
+  const MAG = ['barely', 'a little', 'moderately', 'strongly'];
+  /** One qualitative effect row: direction, rough size, confidence. No hidden numbers. */
+  function effRow(target, lab, extra, action) {
     const good = isGood(target);
-    const v = val;
-    const col = (v * (good ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
-    const w = Math.min(100, Math.abs(v) * 220);
-    return `<div class="eff" data-action="inspect" data-arg="${target}">
+    const col = (lab.sign * (good ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
+    const w = [6, 22, 50, 90][lab.mag] || 0;
+    return `<div class="eff" data-action="${action || 'inspect'}" data-arg="${target}">
       <span>${esc(nameOf(target))} ${extra ? `<span class="tag">${extra}</span>` : ''}</span>
-      <div class="cbar"><span style="background:${col};${v >= 0 ? 'left:50%' : 'right:50%'};width:${w / 2}%"></span></div>
-      <span class="num" style="color:${col}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(k ? 0 : 1)}</span></div>`;
+      <div class="cbar"><span style="background:${col};${lab.sign >= 0 ? 'left:50%' : 'right:50%'};width:${w / 2}%"></span></div>
+      <span class="num" style="color:${col}">${lab.sign >= 0 ? '+' : '−'} ${MAG[lab.mag]}</span></div>`;
+  }
+  /** Size label for a live contribution (your own company: you can feel it, not measure it exactly). */
+  function liveLabel(c) {
+    const a = Math.abs(c);
+    return { sign: Math.sign(c) || 1, mag: a < 0.015 ? 0 : a < 0.05 ? 1 : a < 0.11 ? 2 : 3 };
   }
   const lagTag = (lag) => (lag >= 4 ? 'slow' : lag <= 1 ? 'fast' : '');
 
   function driversHTML(id) {
     const ins = E.effectsInto(id);
-    const live = ins.filter((e) => Math.abs(E.contribution(S, e)) > 0.002)
+    const live = ins.filter((e) => Math.abs(E.contribution(S, e)) > 0.004)
       .sort((a, b) => Math.abs(E.contribution(S, b)) - Math.abs(E.contribution(S, a)));
     const levers = ins.filter((e) => E.nodeType(e.from) === 'policy' && !S.policies[e.from]);
-    const extras = Object.entries(S.extra || {}).map(([k, m]) => [k, m[id]]).filter(([, v]) => v && Math.abs(v) > 0.002);
+    const extras = Object.entries(S.extra || {}).map(([k, m]) => [k, m[id]]).filter(([, v]) => v && Math.abs(v) > 0.004);
     const extraRows = extras.map(([k, v]) => {
       const inp = E.extraInputs.find((x) => x.id === k);
-      const col = (v * (isGood(id) ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
-      return `<div class="eff" data-action="${k === 'hardware' ? 'compute' : 'hiring'}"><span>${esc(inp ? inp.label : k)} <span class="tag">open</span></span>
-        <div class="cbar"><span style="background:${col};${v >= 0 ? 'left:50%' : 'right:50%'};width:${Math.min(100, Math.abs(v) * 220) / 2}%"></span></div>
-        <span class="num" style="color:${col}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}</span></div>`;
+      const lab = liveLabel(v);
+      const col = (lab.sign * (isGood(id) ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
+      return `<div class="eff" data-action="${k === 'hardware' ? 'compute' : k === 'team' ? 'hiring' : 'marketingMenu'}"><span>${esc(inp ? inp.label : k)} <span class="tag">open</span></span>
+        <div class="cbar"><span style="background:${col};${lab.sign >= 0 ? 'left:50%' : 'right:50%'};width:${[6, 22, 50, 90][lab.mag] / 2}%"></span></div>
+        <span class="num" style="color:${col}">${lab.sign >= 0 ? '+' : '−'} ${MAG[lab.mag]}</span></div>`;
     }).join('');
-    let h = `<h3>Driven by</h3>` + extraRows + (live.length ? live.map((e) => effRowFrom(e)).join('') : extraRows ? '' : '<p class="note">Nothing is moving this yet.</p>');
-    if (levers.length) h += `<h3>Policies you could enact</h3>` + levers.map((e) => effRowFrom(e, true)).join('');
+    let h = `<h3>Driven by</h3>` + extraRows + (live.length ? live.map((e) => effRow(e.from, liveLabel(E.contribution(S, e)), lagTag(e.lag))).join('') : extraRows ? '' : '<p class="note">Nothing is moving this yet.</p>');
+    if (levers.length) h += `<h3>Policies that might move it</h3><p class="note">Expected effects — this world may differ.</p>` + levers.map((e) => { const l = FL.Fog.effectLabel(S, e, 0.6); return effRow(e.from, l, 'guess'); }).join('');
     return h;
   }
-  function effRowFrom(e, potential) {
-    const v = potential ? e.k * E.curve(e.curve, 0.6) : E.contribution(S, e);
-    const good = isGood(e.to);
-    const col = (v * (good ? 1 : -1)) >= 0 ? '#4ade80' : '#f87171';
-    const w = Math.min(100, Math.abs(v) * 220);
-    return `<div class="eff" data-action="inspect" data-arg="${e.from}">
-      <span>${esc(nameOf(e.from))} <span class="tag">${potential ? 'not active' : lagTag(e.lag)}</span></span>
-      <div class="cbar"><span style="background:${col};${v >= 0 ? 'left:50%' : 'right:50%'};width:${w / 2}%;opacity:${potential ? 0.5 : 1}"></span></div>
-      <span class="num" style="color:${col}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}</span></div>`;
-  }
   function affectsHTML(id) {
-    const outs = E.effectsFrom(id).sort((a, b) => Math.abs(E.contribution(S, b)) - Math.abs(E.contribution(S, a)));
+    const outs = E.effectsFrom(id).filter((e) => Math.abs(E.contribution(S, e)) > 0.004).sort((a, b) => Math.abs(E.contribution(S, b)) - Math.abs(E.contribution(S, a)));
     if (!outs.length) return '';
-    return `<h3>Affects</h3>` + outs.map((e) => effRow(e.to, E.contribution(S, e), lagTag(e.lag))).join('');
+    return `<h3>Affects</h3>` + outs.map((e) => effRow(e.to, liveLabel(E.contribution(S, e)), lagTag(e.lag))).join('');
   }
 
   UI.inspect = function (id) {
@@ -434,25 +444,27 @@
     }
     $('polBtns').innerHTML = btns;
     const src = 0.2 + 0.8 * lvl;
-    $('polEffects').innerHTML = E.effectsFrom(p.id)
-      .sort((a, b) => Math.abs(b.k) - Math.abs(a.k))
-      .map((e) => effRow(e.to, e.k * E.curve(e.curve, src), lagTag(e.lag))).join('');
+    const labs = E.effectsFrom(p.id).map((e) => ({ e, l: FL.Fog.effectLabel(S, e, src) })).sort((a, b) => b.l.mag - a.l.mag);
+    const conf = labs.length ? labs[0].l.confidence : 'guess';
+    $('polEffects').innerHTML = `<p class="note">${conf === 'measured' ? 'Measured from your own experience with this policy.' : conf === 'rough' ? 'Early read — effects take quarters to show, and this world may differ from expectations.' : 'An educated guess. Every world is different; you will learn the real effects by running it.'}</p>` +
+      labs.map(({ e, l }) => effRow(e.to, l, [lagTag(e.lag), l.confidence].filter(Boolean).join(' · '))).join('');
   }
 
   function statHTML(d, type) {
-    const id = d.id, v = S.values[id];
-    const big = id === 'capability' ? `${Math.floor(S.cap)}<small class="muted" style="font-size:14px"> / 100</small>` : pct(v);
+    const id = d.id, v = shown(id);
+    const m = FL.Fog.measured(S, id);
+    const big = id === 'capability' ? `${Math.floor(S.cap)}<small class="muted" style="font-size:14px"> / 100</small>` : m.sd ? `~${pct(v)} <small class="muted" style="font-size:14px">±${Math.round(160 * m.sd)} · ${m.kind}</small>` : pct(v);
     let extra = '';
     if (id === 'capability') {
       extra = `<div class="row"><span>Gain last quarter</span><span class="m">+${(lastReport && lastReport.capGain || 0).toFixed(1)}</span></div>` +
-        S.rivals.map((r) => `<div class="row"><span style="color:${r.color}">${esc(r.name)}</span><span class="m">${Math.floor(r.cap)}</span></div>`).join('') +
+        S.rivals.map((r) => { const e = FL.Fog.rivalEstimate(S, r); return `<div class="row"><span style="color:${r.color}">${esc(r.name)}</span><span class="m">~${Math.round(e.est)} ±${Math.round(1.6 * e.sd)}</span></div>`; }).join('') +
         `<p class="note">Capability grows each quarter with Research Velocity. Quality, hype, regulatory heat and the difficulty of alignment all rise with it.</p>` +
         (S.policies.rsp ? `<p class="note">Your Responsible Scaling Policy pauses scaling above capability ${Math.round(E.pauseThreshold(S))}.</p>` : '');
     } else if (id === 'runway') {
       const rq = runwayQ();
       extra = `<div class="row"><span>Quarters of cash</span><span class="m">${rq === Infinity ? 'Profitable' : rq.toFixed(1)}</span></div>`;
     }
-    const hist = id === 'capability' ? S.history._cap : S.history[id];
+    const hist = id === 'capability' ? S.history._cap : FL.Fog.FOGGY.includes(id) ? null : S.history[id];
     return `
       <div class="insp-head"><span class="chip" style="color:#7dd3fc">${type === 'indicator' ? 'Indicator' : 'Simulation value'}</span>
         ${d.good === false ? '<span class="chip" style="color:#f87171">Lower is better</span>' : ''}</div>
@@ -483,10 +495,9 @@
         <span class="chip" style="color:${on ? col : '#8a97ad'}">${on ? `Active ${S.active[d.id]} q` : 'Dormant'}</span></div>
       <div class="insp-title">${esc(d.name)}</div>
       <div class="desc">${esc(d.desc)}</div>
-      <div class="row"><span>Pressure</span><span class="m">${Math.round(p * 100)} (starts ${Math.round(d.on * 100)}, ends below ${Math.round(d.off * 100)})</span></div>
-      ${spark(S.history[d.id], 300, 40, { zero: d.on, color: col })}
+      <div class="row"><span>Pressure</span><span class="m">${p > d.on ? 'past the tipping point' : p > d.on * 0.85 ? 'close to tipping' : p > d.on * 0.6 ? 'building' : 'low'}</span></div>
       ${driversHTML(d.id)}
-      <h3>Effects while active</h3>${d.e.map(([to, k]) => effRow(to, k)).join('')}
+      <h3>Effects while active</h3>${d.e.map(([to, k]) => effRow(to, liveLabel(k))).join('')}
       ${d.special && d.special.cost ? `<p class="note">Costs ${money(d.special.cost)}+ per quarter in legal fees.</p>` : ''}
       ${d.special && d.special.rivalBoost ? '<p class="note">Rivals gain capability faster while this lasts.</p>' : ''}
       ${d.id === 'injunction' ? '<p class="note">Three consecutive quarters of injunction ends the game.</p>' : ''}`;
@@ -535,7 +546,7 @@
     if (n.type === 'stakeholder') return `<b>${esc(d.name)}</b>Happiness ${spct(S.happiness[id])}`;
     if (n.type === 'situation') return `<b>${esc(d.name)}</b>${esc(d.desc)}`;
     if (id === 'capability') return `<b>Frontier Capability</b>${S.cap.toFixed(1)} / 100`;
-    return `<b>${esc(d.name)}</b>${pct(S.values[id])}`;
+    return FL.Fog.FOGGY.includes(id) ? `<b>${esc(d.name)}</b>~${pct(shown(id))} (${FL.Fog.measured(S, id).kind})` : `<b>${esc(d.name)}</b>${pct(S.values[id])}`;
   }
 
   // ── modals ───────────────────────────────────────────────
@@ -560,9 +571,6 @@
       <input class="name-input" id="coName" value="${esc((saved && saved.company) || 'Frontier Labs')}" maxlength="32">
       <h3>Choose your origin story</h3>
       <div class="cards">${cards}</div>
-      <h3>Pace</h3>
-      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">${PACES.map((p) => `
-        <button class="card ${p.id === pickedPace ? 'sel' : ''}" data-action="pickPace" data-arg="${p.id}"><h4>${esc(p.name)}</h4><p>${esc(p.blurb)}</p></button>`).join('')}</div>
       <h3>Difficulty</h3>
       <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${FL.DIFFICULTIES.map((d) => `
         <button class="card ${d.id === pickedDiff ? 'sel' : ''}" data-action="pickDiff" data-arg="${d.id}"><h4>${esc(d.name)}</h4><p>${esc(d.blurb)}</p></button>`).join('')}</div>
@@ -581,9 +589,11 @@
   function helpHTML() {
     return `<h1>How to play</h1>
       <div class="howto">
-        <p><b>Each turn is a quarter.</b> You have ten years (40 quarters). Make changes, then press <i>End quarter</i>.</p>
+        <p><b>It runs in real time.</b> One game week passes every two seconds at 1x; you have ten years. Change speed with the buttons or keys 1-4; Space pauses (single-player only). Nothing waits for you.</p>
+        <p><b>Decisions land in your inbox</b> with a countdown. Ignore one and the default (dashed) option happens when time runs out.</p>
+        <p><b>You never see everything.</b> Rivals are estimates from releases, leaks and intel. Your own safety is an eval estimate, trust is a poll, and policy effects are educated guesses until you have run them for a while. Every world is different, and analyst notes about it are sometimes wrong.</p>
         <p><b>Policies</b> are the circles on the outer ring, grouped by category. Click one to enact it, set its slider, or cancel it. Dashed circles are not enacted.</p>
-        <p><b>Bandwidth</b> is your leadership attention: enacting, adjusting and cancelling policies cost it. You earn more each quarter, more if stakeholders approve of you. Changes made this quarter can be reverted for free.</p>
+        <p><b>Bandwidth</b> is your leadership attention: enacting, adjusting and cancelling policies cost it. You earn more each quarter, more if stakeholders approve of you. Changes made within the same quarter can be reverted for free.</p>
         <p><b>Money.</b> Most policies cost cash every quarter. Revenue comes from adoption times monetization. Funding rounds happen every six quarters; the amount depends on valuation and investor confidence. Run out of cash and you are done.</p>
         <p><b>The board</b> (middle ring) is a living simulation. Hover any circle to see what drives it (wires in) and what it drives (wires out). Green helps, red hurts. Effects take quarters to fully kick in.</p>
         <p><b>Stakeholders</b> (inner ring and left panel) are your voter groups. Unhappy investors kill funding rounds. An unhappy board fires you.</p>
@@ -599,9 +609,8 @@
   }
 
   UI.showReport = function (r) {
-    lastReport = r;
     const f = r.finance;
-    const deltas = r.deltas.slice(0, 8).map((d) => {
+    const deltas = (r.deltas || []).filter((d) => !FL.Fog.FOGGY.includes(d.id) && d.id !== 'lead').slice(0, 8).map((d) => {
       const better = (d.to - d.from) * (d.good === false ? -1 : 1) > 0;
       return `<li><span>${esc(d.name)}</span><span class="m ${better ? 'pos' : 'neg'}">${Math.round(d.from * 100)} → ${Math.round(d.to * 100)}</span></li>`;
     }).join('');
@@ -636,57 +645,65 @@
             <li><span>Revenue</span><span class="m pos">${money(f.revenue)}</span></li>
             <li><span>Costs</span><span class="m neg">${money(f.costs)}</span></li>
             <li><span>Net</span><span class="m ${f.net >= 0 ? 'pos' : 'neg'}">${money(f.net)}</span></li>
-            <li><span>Cash now</span><span class="m" id="repCash">${money(S.cash - (r.funding ? r.funding.raised : 0))}</span></li>
+            <li><span>Cash now</span><span class="m">${money(S.cash)}</span></li>
             <li><span>Valuation</span><span class="m">${money(S.valuation)}</span></li>
           </ul>
           <h3>The race</h3>
           <ul class="rep-list">
-            <li><span>Your capability</span><span class="m"><span id="repCap">${Math.floor(S.cap - r.capGain)}</span> <span class="pos">(+${r.capGain.toFixed(1)})</span></span></li>
-            ${S.rivals.map((x) => `<li><span>${esc(x.name)}</span><span class="m">${Math.floor(x.cap)}</span></li>`).join('')}
+            <li><span>Your capability</span><span class="m">${Math.floor(S.cap)} <span class="pos">(+${r.capGain.toFixed(1)} that quarter)</span></span></li>
+            ${S.rivals.map((x) => { const e = FL.Fog.rivalEstimate(S, x); return `<li><span>${esc(x.name)}</span><span class="m">~${Math.round(e.est)} ±${Math.round(1.6 * e.sd)}</span></li>`; }).join('')}
           </ul>
           ${r.paused ? '<div class="callout warn">Your Responsible Scaling Policy kicked in: capability has outrun safety, so scaling slowed to a crawl.</div>' : ''}
           ${r.news.map((n) => `<p class="note">${esc(n)}</p>`).join('')}
         </div>
         <div><h3>Biggest changes</h3><ul class="rep-list">${deltas || '<li class="muted">A quiet quarter.</li>'}</ul></div>
       </div>
-      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="afterReport">Continue</button></div>
+      ${(r.notes || []).map((n) => `<div class="callout"><b>Analyst note:</b> ${esc(n)} <span class="muted">(may or may not be right)</span></div>`).join('')}
+      ${(r.expired || []).map((n) => `<div class="callout bad">${esc(n)}</div>`).join('')}
+      <p class="note">The clock is still running while you read.</p>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="closeModal">Close</button></div>
       </div>`);
-    $('modalCard').querySelectorAll('.reveal > *').forEach((el, i) => (el.style.animationDelay = i * 140 + 'ms'));
-    FX.countUp($('repCash'), S.cash - (r.funding ? r.funding.raised : 0), S.cash, 900, money);
-    FX.countUp($('repCap'), Math.floor(S.cap - r.capGain), Math.floor(S.cap), 700);
-    const badStart = r.started.some((id) => !E.node(id).def.good);
-    if (badStart || (r.funding && !r.funding.ok)) { A.play('crisis'); FX.shake($('modalCard'), 5, 320); }
-    else if (r.funding && r.funding.ok) setTimeout(() => A.play('cash'), 400);
-    else if ((r.pitfallWarnings || []).length || r.warnings.length) A.play('warn');
-    else if (ob.done.length) A.play('chime');
-    recordUnlocks(r, 900);
+    $('modalCard').querySelectorAll('.reveal > *').forEach((el, i) => (el.style.animationDelay = i * 90 + 'ms'));
   };
 
-  /** Celebration cards for model generations, valuation tiers and new acts, shown one by one. */
-  function showCelebration(c) {
-    A.play('milestone');
-    FX.flash('#fbbf24');
-    openModal(`<div class="ms-card">
-      <div class="kicker">${c.kicker}</div><div class="big">${esc(c.title)}</div><p>${esc(c.text)}</p>
-      <div class="btn-row" style="justify-content:center"><button class="btn primary big" data-action="afterReport">Continue</button></div></div>`);
-    const r = $('modalCard').getBoundingClientRect();
-    FX.burst(r.left + r.width / 2, r.top + 90);
+  // ── Decision inbox (non-blocking; the clock keeps running) ─────
+  function renderInbox() {
+    const box = $('inbox');
+    if (!box || !S) return;
+    const sp = MP.active() ? (MP.lobby.settings.speed || 1) : speed;
+    const cards = S.inbox.map((item) => {
+      const d = FL.DILEMMAS.find((x) => x.id === item.id);
+      if (!d) return '';
+      const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
+      const total = item.deadline - item.arrived, left = Math.max(0, item.deadline - S.week - loopAcc / WEEK_MS);
+      const secs = sp ? Math.ceil((left * WEEK_MS) / sp / 1000) : null;
+      return `<div class="dcard ${pit ? 'pit' : ''}">
+        <div class="dhead"><span>${pit ? `Pitfall · ${pit.horizon}-term` : d.launch ? `${esc(S.lastModel || 'New model')} is ready` : 'Decision'}</span>
+          <span class="${left < 1.5 ? 'neg' : ''}">${secs == null ? 'paused' : `${Math.ceil(left)} wk · ~${secs}s`}</span></div>
+        <div class="dbar"><span style="width:${(left / total) * 100}%"></span></div>
+        <b>${esc(d.title)}</b><p>${esc(d.text)}</p>
+        <div class="dopts">${d.options.map((o, i) => `<button class="btn ${i === E.defaultOption(d) ? 'dflt' : ''}" data-action="decide" data-arg="${item.uid}:${i}" title="${esc(o.desc)}${i === E.defaultOption(d) ? ' — this happens if you run out of time' : ''}">${esc(o.label)}${o.cash ? ` <span class="${o.cash > 0 ? 'pos' : 'neg'}">${o.cash > 0 ? '+' : ''}${money(E.eventCash(S, o))}</span>` : ''}</button>`).join('')}</div>
+      </div>`;
+    }).join('');
+    const results = decisionResults.map((r, i) => `<div class="dcard done"><div class="dhead"><span>${esc(r.title)}</span><button class="btn" data-action="dismissResult" data-arg="${i}">Close</button></div>
+      <p><b>${esc(r.label)}:</b> ${esc(r.text)}</p>${r.history ? `<div class="history"><h4>History rhymes · ${esc(r.pitName)}</h4><p>${esc(r.history)}</p><p class="lesson">${esc(r.lesson)}</p></div>` : ''}</div>`).join('');
+    box.innerHTML = cards + results;
   }
 
-  UI.showDilemma = function () {
-    const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
-    if (!d) { S.pendingDilemma = null; return closeModal(); }
+  UI.decide = function (uid, i) {
+    const item = S.inbox.find((x) => x.uid === uid);
+    if (!item) return { ok: false, reason: 'That decision is gone.' };
+    const d = FL.DILEMMAS.find((x) => x.id === item.id);
+    if (!(i >= 0 && i < d.options.length)) return { ok: false, reason: `Choose 1-${d.options.length}.` };
+    const res = E.resolveDilemma(S, i, uid);
     const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
-    A.play(pit ? 'crisis' : 'decision');
-    if (pit) { FX.shake($('modalCard'), 6, 380); FX.flash('#ef4444'); }
-    openModal(`
-      <h2>${pit ? `Pitfall · ${pit.horizon}-term · ${esc(pit.name)}` : d.launch ? `${esc(S.company)} ${esc(S.lastModel || '')} is ready` : 'Decision required'} · ${E.quarterLabel(S.turn)}</h2>
-      <h1>${esc(d.title)}</h1>
-      <p class="lede">${esc(d.text)}</p>
-      <div class="cards">${d.options.map((o, i) => `
-        <button class="card" data-action="choose" data-arg="${i}"><h4>${esc(o.label)}</h4><p>${esc(o.desc)}</p>
-        ${o.cash ? `<div class="meta ${o.cash > 0 ? 'pos' : 'neg'}">${o.cash > 0 ? '+' : ''}${money(o.cash)}</div>` : ''}</button>`).join('')}
-      </div>`);
+    decisionResults.unshift({ title: d.title, label: d.options[i].label, text: res.text, history: pit && pit.history, lesson: pit && pit.lesson, pitName: pit && pit.name, at: Date.now() });
+    decisionResults = decisionResults.slice(0, 2);
+    A.play('click');
+    recordUnlocks(res, 200);
+    afterAction({ ok: true });
+    if (res.ending) handleEnding(res.ending);
+    return { ok: true, res, dilemma: d, pitfall: pit };
   };
 
   UI.showEnding = function (end) {
@@ -698,11 +715,13 @@
       <line x1="0" x2="${w}" y1="${h - (100 / 105) * h}" y2="${h - (100 / 105) * h}" stroke="#fbbf24" stroke-dasharray="4 4"/>
       ${S.rivals.map((r) => line(H['_rival_' + r.id], r.color, 1.5)).join('')}${line(H._cap, '#7dd3fc', 3)}
       ${line(H.safety.map((v) => v * 100), '#f472b6', 2)}</svg>
-      <p class="note"><span style="color:#7dd3fc">You</span> · ${S.rivals.map((r) => `<span style="color:${r.color}">${esc(r.name)}</span>`).join(' · ')} · <span style="color:#f472b6">Your safety maturity</span> · <span style="color:#fbbf24">AGI</span></p>`;
+      <p class="note"><span style="color:#7dd3fc">You</span> · ${S.rivals.map((r) => `<span style="color:${r.color}">${esc(r.name)}</span>`).join(' · ')} · <span style="color:#f472b6">Your true safety</span> · <span style="color:#fbbf24">AGI</span> — the real numbers, revealed now that it is over.</p>`;
+    const traits = FL.World ? FL.World.reveal(S) : [];
     openModal(`
       <h2>${esc(S.company)} · ${E.quarterLabel(Math.min(S.turn, E.MAX_TURNS))}</h2>
       <h1 class="${end.win ? 'pos' : 'neg'}">${esc(end.title)}</h1>
       <p class="lede">${esc(end.text)}</p>
+      ${traits.length ? `<div class="callout"><b>The hidden world was:</b> ${traits.map(esc).join(' · ')}. Your evals had safety at ~${pct(FL.Fog.measured(S, 'safety').est)}; the truth was ${pct(S.values.safety)}.</div>` : ''}
       ${chart}
       <ul class="rep-list">
         <li><span>Score</span><span class="m">${E.score(S)}</span></li>
@@ -717,6 +736,7 @@
   // ── flow ─────────────────────────────────────────────────
   UI.renderAll = function () {
     renderTicker();
+    renderInbox();
     UI.renderTopbar();
     UI.renderLeft();
     UI.renderBoard();
@@ -726,16 +746,16 @@
 
   function startGame(state) {
     S = state;
-    selected = null; hovered = null; preview = {}; lastReport = null; endingShown = false; celebrations = [];
-    clock.deadline = null; clock.msLeft = null; clock.paused = false;
+    selected = null; hovered = null; preview = {}; lastReport = null; endingShown = false; decisionResults = [];
+    loopAcc = 0; speed = 1; S.events = [];
     closeModal();
     UI.renderAll();
     save();
     if (S.unseen) { recordUnlocks(S.unseen, 400); S.unseen = null; save(); }
     A.unlock();
     A.setTension(S.tension || 0);
+    renderInbox();
     if (S.ended) UI.showEnding(S.ended);
-    else if (S.pendingDilemma) UI.showDilemma();
   }
 
   const actions = {
@@ -746,13 +766,17 @@
     menu: () => UI.showStart(),
     closeModal: () => closeModal(),
     pickArch: (id) => { pickedArch = id; document.querySelectorAll('.card[data-action=pickArch]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
-    found: () => { const g = E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff); g.pace = pickedPace; startGame(g); },
-    pickPace: (id) => { pickedPace = id; document.querySelectorAll('.card[data-action=pickPace]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
-    togglePause: () => {
-      if (MP.active()) { if (MP.isHost()) MP.setPaused(!MP.lobby.paused); return; }
-      clock.paused = !clock.paused;
-      FX.toast(clock.paused ? 'Paused' : 'Resumed', 'info', 1200);
+    found: () => startGame(E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff)),
+    setSpeed: (v) => {
+      v = +v;
+      if (MP.active()) { if (MP.isHost() && v > 0) MP.setSettings({ speed: v }); return; }
+      speed = v;
+      UI.renderTopbar();
     },
+    togglePause: () => { if (MP.active()) return; speed = speed ? 0 : 1; UI.renderTopbar(); FX.toast(speed ? 'Running' : 'Paused', 'info', 1000); },
+    decide: (arg) => { const [uid, i] = String(arg).split(':').map(Number); UI.decide(uid, i); },
+    dismissResult: (i) => { decisionResults.splice(+i, 1); renderInbox(); },
+    openNews: (turn) => { const r = (S.newspapers || []).find((x) => String(x.turn) === String(turn)) || lastReport; if (r) UI.showReport(r); },
     pickDiff: (id) => { pickedDiff = id; document.querySelectorAll('.card[data-action=pickDiff]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
     continue: () => startGame(loadSave()),
     apply: (id) => {
@@ -774,50 +798,6 @@
       S.log.push({ turn: S.turn, text: `Cancelled ${nameOf(id)}` });
       A.play('cancel');
       save(); UI.renderAll();
-    },
-    endTurn: (arg, el, done) => {
-      if (!S || S.ended || busy) return;
-      if (MP.active() && arg !== 'mp') {
-        if (S.pendingDilemma) return UI.showDilemma();
-        if (done) mpEndResolve = done;
-        MP.ready();
-        A.play('click');
-        UI.renderTopbar();
-        return;
-      }
-      if (MP.active()) MP.applySnapshots(S);
-      busy = true;
-      preview = {};
-      A.play('endTurn');
-      $('boardWrap').classList.add('thinking');
-      showInterstitial();
-      const beforeVals = { ...S.values };
-      setTimeout(() => {
-        const r = E.endTurn(S);
-        meta.runs += r && r.turn === 1 ? 1 : 0;
-        save();
-        $('boardWrap').classList.remove('thinking');
-        $('interstitial').classList.add('hidden');
-        UI.renderAll();
-        floatDeltas(beforeVals);
-        A.setTension(S.tension || 0);
-        celebrations = [];
-        (r.milestones || []).forEach((m) => celebrations.push(m.kind === 'model'
-          ? { kicker: `New model · capability ${m.at}`, title: `${S.company} ${m.name}`, text: m.blurb }
-          : { kicker: 'Valuation milestone', title: m.name, text: m.blurb }));
-        if (r.era) celebrations.push({ kicker: 'A new era begins', title: r.era.name, text: r.era.blurb });
-        busy = false;
-        UI.showReport(r);
-        if (MP.active()) MP.sendSnap(S, r);
-        if (done) done(r);
-      }, 1100);
-    },
-    afterReport: () => {
-      if (S.unseen) { recordUnlocks(S.unseen); S.unseen = null; }
-      if (celebrations.length) return showCelebration(celebrations.shift());
-      if (S.ended) UI.showEnding(S.ended);
-      else if (S.pendingDilemma) UI.showDilemma();
-      else closeModal();
     },
     archive: (tab) => showArchive(tab || 'all'),
     mpHost: async (kind) => {
@@ -847,7 +827,7 @@
     mpStart: () => MP.start(),
     mpLeave: () => { MP.leave(); UI.showStart(); },
     mpProfile: () => MP.setProfile({ name: $('mpName').value.trim() || 'Player', company: $('mpCompany').value.trim() || 'Frontier Labs', archetype: $('mpArch').value }),
-    mpSettings: () => MP.setSettings({ difficulty: $('mpDiff').value, aiRivals: $('mpAi').checked, mode: $('mpMode').value, secondsPerQuarter: +$('mpSecs').value }),
+    mpSettings: () => MP.setSettings({ difficulty: $('mpDiff').value, aiRivals: $('mpAi').checked, speed: +$('mpSpeed').value }),
     mpChat: () => { const i = $('mpChatIn'); if (i && i.value.trim()) { MP.chat(i.value.trim()); i.value = ''; } },
     copyInvite: () => { try { navigator.clipboard.writeText(MP.inviteLink()); FX.toast('Invite link copied.', 'good', 2000); } catch (e) { /* ignore */ } },
     hiring: () => showHiring(),
@@ -873,23 +853,7 @@
       <button class="btn big danger" data-action="menu">New game</button>
       <button class="btn big" data-action="closeModal">Back to the board</button></div>`),
     mute: () => { A.setMuted(!A.isMuted()); closeModal(); UI.renderTopbar(); FX.toast(A.isMuted() ? 'Sound off' : 'Sound on', 'info', 1500); },
-    choose: (i) => {
-      const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
-      const res = E.resolveDilemma(S, +i);
-      S.finance = E.computeFinances(S);
-      S.valuation = E.valuation(S);
-      save();
-      UI.renderAll();
-      A.play('click');
-      const pit = d && d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
-      openModal(`<h2>${esc(d ? d.title : '')}</h2><h1>${esc(d ? d.options[+i].label : '')}</h1><p class="lede">${esc(res.text)}</p>
-        ${pit ? `<div class="history"><h4>History rhymes · ${esc(pit.name)}</h4><p>${esc(pit.history)}</p><p class="lesson">${esc(pit.lesson)}</p></div>` : ''}
-        <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="${res.ending ? 'showEnd' : S.pendingDilemma ? 'nextDilemma' : 'closeModal'}">Continue</button></div>`);
-      recordUnlocks(res, 300);
-      return res;
-    },
     showEnd: () => UI.showEnding(S.ended),
-    nextDilemma: () => UI.showDilemma(),
     archiveTab: (tab) => showArchive(tab),
   };
 
@@ -1069,12 +1033,6 @@
   function quoteHTML(a) {
     return `<q>${esc(a.quote)}</q><div class="by">— ${esc(a.speaker || 'Unattributed')}, ${a.year}${a.paraphrase ? ' (paraphrase)' : ''}</div>`;
   }
-  function showInterstitial() {
-    const box = $('interstitial');
-    if (!box || !S) return;
-    box.innerHTML = `<div class="kicker">${E.quarterLabel(S.turn)} closes</div>` + quoteHTML(randomQuote());
-    box.classList.remove('hidden');
-  }
   function showSplash() {
     const sp = $('splash');
     if (!sp) return;
@@ -1122,9 +1080,9 @@
 
   function renderTicker() {
     if (!S) return;
-    const items = [];
+    const items = feedItems.slice();
     const h = S.history._cap || [];
-    S.rivals.forEach((r) => items.push(`<b>${esc(r.name)}</b> capability ${Math.floor(r.cap)}`));
+    S.rivals.forEach((r) => { const e = FL.Fog.rivalEstimate(S, r); items.push(`<b>${esc(r.name)}</b> est. capability ~${Math.round(e.est)}`); });
     items.push(`<b>${esc(S.company)}</b> ${money(S.valuation)} valuation`);
     Sys.risks(S).slice(0, 2).forEach((r) => items.push(`<b>Whispers</b> ${esc(r.warn)}`));
     const owned = FL.ARCHIVE.filter((a) => a.quote && (meta.artifacts.includes(a.id) || a.rarity === 'common'));
@@ -1145,11 +1103,11 @@
     const me = MP.me() || {};
     const host = MP.isHost();
     const rows = L.players.map((p) => `<li><span><i class="dot" style="background:${p.color || '#888'}"></i><b>${esc(p.company)}</b> <span class="muted">${esc(p.bot ? 'AI lab' : p.name)}${p.host ? ' · host' : ''}${p.id === MP.myId ? ' · you' : ''}${p.connected === false ? ' · disconnected' : ''}</span></span>
-      <span class="m">${esc((FL.ARCHETYPES.find((a) => a.id === p.archetype) || {}).name || '')}${L.started ? ` · cap ${Math.floor(p.cap)}${p.ended ? ' · ' + esc(p.ended.title) : p.ready ? ' · ready' : ''}` : ''}
+      <span class="m">${esc((FL.ARCHETYPES.find((a) => a.id === p.archetype) || {}).name || '')}${L.started ? ` · last release ${Math.floor(p.cap)}${p.ended ? ' · ' + esc(p.ended.title) : ''}` : ''}
       ${host && !L.started && p.id !== MP.myId ? ` <button class="btn" data-action="mpRemove" data-arg="${p.id}">Remove</button>` : ''}</span></li>`).join('');
     const chat = L.chat.slice(-12).map((c) => `<div><b>${esc(c.from)}</b> <span class="muted">${esc(c.company || '')}</span>: ${esc(c.text)}</div>`).join('');
     openModal(`<h1>Lobby <span class="mono">${esc(L.code)}</span></h1>
-      <h2>${L.kind === 'local' ? 'Same-browser lobby: open the invite link in another tab.' : 'Online, peer to peer. Share the code or invite link with friends.'} ${L.started ? `· Quarter ${E.quarterLabel(L.turn)}` : ''}</h2>
+      <h2>${L.kind === 'local' ? 'Same-browser lobby: open the invite link in another tab.' : 'Online, peer to peer. Share the code or invite link with friends.'} Real time — the clock never stops.</h2>
       <div class="btn-row"><input class="name-input" readonly value="${esc(MP.inviteLink())}" style="flex:1;font-size:12px"><button class="btn" data-action="copyInvite">Copy invite link</button></div>
       <div class="rep-grid">
         <div><h3>Labs in this race</h3><ul class="rep-list">${rows}</ul>
@@ -1161,10 +1119,9 @@
             <button class="btn" data-action="mpProfile">Update</button></div>` : ''}
           ${host && !L.started ? `<h3>Match settings</h3><div class="btn-row">
             <select id="mpDiff" class="sel">${FL.DIFFICULTIES.map((d) => `<option value="${d.id}" ${d.id === L.settings.difficulty ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
-            <select id="mpMode" class="sel"><option value="realtime" ${L.settings.mode === 'realtime' ? 'selected' : ''}>Real-time</option><option value="turns" ${L.settings.mode === 'turns' ? 'selected' : ''}>Turn-based</option></select>
-            <select id="mpSecs" class="sel">${[30, 45, 60, 90].map((n) => `<option value="${n}" ${n === L.settings.secondsPerQuarter ? 'selected' : ''}>${n}s per quarter</option>`).join('')}</select>
+            <select id="mpSpeed" class="sel">${[0.5, 1, 2, 4].map((n) => `<option value="${n}" ${n === L.settings.speed ? 'selected' : ''}>Speed ${n}x</option>`).join('')}</select>
             <label class="note"><input type="checkbox" id="mpAi" ${L.settings.aiRivals ? 'checked' : ''}> Include the classic AI rival labs</label>
-            <button class="btn" data-action="mpSettings">Apply</button></div>` : !L.started ? `<p class="note">Difficulty: ${esc(L.settings.difficulty || 'normal')} · ${L.settings.mode === 'realtime' ? `Real-time, ${L.settings.secondsPerQuarter}s per quarter` : 'Turn-based'} · Classic AI rivals: ${L.settings.aiRivals ? 'on' : 'off'}</p>` : ''}
+            <button class="btn" data-action="mpSettings">Apply</button></div>` : !L.started ? `<p class="note">Difficulty: ${esc(L.settings.difficulty || 'normal')} · Speed ${L.settings.speed || 1}x · Classic AI rivals: ${L.settings.aiRivals ? 'on' : 'off'}</p>` : ''}
         </div>
         <div><h3>Chat</h3><div class="chatlog">${chat || '<span class="muted">Say hello. Trash talk encouraged.</span>'}</div>
           <div class="btn-row"><input id="mpChatIn" class="name-input" style="flex:1" placeholder="Message" maxlength="300"><button class="btn" data-action="mpChat">Send</button></div></div>
@@ -1182,57 +1139,142 @@
     if (S && MP.active()) { MP.applySnapshots(S); UI.renderTopbar(); UI.renderLeft(); }
     if (lobbyOpen()) showLobby();
   });
-  MP.on('start', () => { startGame(MP.makeGame()); FX.toast(`The race is on: ${MP.lobby.players.length} labs.`, 'good'); });
-  MP.on('advance', () => {
-    if (!S || S.ended) { UI.renderTopbar(); return; }
-    if (S.pendingDilemma) {
-      // Real time waits for no one: hesitate and the default happens.
-      const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
-      FL.Bots.decide(S);
-      closeModal();
-      FX.toast(`<b>Out of time.</b> ${esc(d ? d.title : 'The decision')} went with the default.`, 'bad', 5000);
-    }
-    actions.endTurn('mp', null, (r) => { if (mpEndResolve) { const f = mpEndResolve; mpEndResolve = null; f(r); } });
-  });
-  MP.on('clock', (c) => { mpClock = c; UI.renderTopbar(); });
+  MP.on('start', () => { startGame(MP.makeGame()); FX.toast(`The race is on: ${MP.lobby.players.length} labs, in real time.`, 'good'); });
   MP.on('chat', (c) => { if (!lobbyOpen()) FX.toast(`<span class="tk">${esc(c.company || '')}</span><b>${esc(c.from)}:</b> ${esc(c.text)}`, 'info', 5000); else showLobby(); });
-  MP.on('ended', (end) => { save(); UI.renderAll(); UI.showEnding(end); });
+  MP.on('ended', (end) => handleEnding(end));
   MP.on('error', (e) => FX.toast(esc(e), 'bad', 5000));
   MP.on('hostLeft', () => FX.toast('The host left the lobby.', 'bad', 6000));
 
-  // ── Real-time clock ─────────────────────────────────────
-  const fmtSecs = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
-  function clockLoop() {
-    const badge = $('clock');
-    if (!badge) return;
-    const now = Date.now();
-    let period = 0, left = null, paused = false, canPause = false;
-    if (S && !S.ended && MP.active() && MP.realtime()) {
-      period = MP.lobby.settings.secondsPerQuarter * 1000;
-      paused = !!mpClock.paused;
-      left = paused ? (mpClock.msLeft || 0) : mpClock.deadline ? mpClock.deadline - now : null;
-      canPause = MP.isHost();
-    } else if (S && !S.ended && !MP.active() && S.pace && S.pace !== 'turns') {
-      period = PACES.find((p) => p.id === S.pace).secs * 1000;
-      canPause = true;
-      const blocked = !$('modal').classList.contains('hidden') || document.hidden || busy;
-      paused = clock.paused || blocked;
-      if (paused) { if (clock.deadline) { clock.msLeft = clock.deadline - now; clock.deadline = null; } }
-      else if (!clock.deadline) { clock.deadline = now + (clock.msLeft != null ? clock.msLeft : period); clock.msLeft = null; }
-      left = clock.deadline ? clock.deadline - now : clock.msLeft != null ? clock.msLeft : period;
-      if (!paused && left <= 0) {
-        clock.deadline = null; clock.msLeft = null;
-        if (S.pendingDilemma) UI.showDilemma(); else actions.endTurn();
+  // ── The real-time loop ──────────────────────────────────
+  function handleEnding(end) {
+    if (endingShown) return;
+    save();
+    UI.renderAll();
+    UI.showEnding(end);
+  }
+
+  /** Turn engine events into notifications, sounds and effects. Nothing here pauses the game. */
+  function handleEvents() {
+    const evs = S.events.splice(0);
+    let toasts = 0;
+    const T = (html, kind, ms) => { if (toasts++ < 4) FX.toast(html, kind, ms); };
+    for (const ev of evs) {
+      switch (ev.type) {
+        case 'decision': {
+          const d = FL.DILEMMAS.find((x) => x.id === ev.id);
+          if (d && d.pitfall) { A.play('crisis'); FX.shake($('boardWrap'), 5, 300); FX.flash('#ef4444'); } else A.play('decision');
+          break;
+        }
+        case 'expired': A.play('warn'); T(`<span class="tk">Out of time</span>${esc(ev.text)}`, 'bad', 6000); break;
+        case 'situation': {
+          const d = E.node(ev.id).def;
+          const good = ev.on === d.good;
+          T(`<span class="tk">${ev.on ? 'Started' : 'Ended'}</span><b>${esc(d.name)}</b>${ev.on ? '<br>' + esc(d.desc) : ''}`, good ? 'good' : 'bad', 6000);
+          if (ev.on && !d.good) { A.play('crisis'); FX.shake($('boardWrap'), 4, 260); } else if (good) A.play('chime');
+          break;
+        }
+        case 'warning': A.play('warn'); T(`<span class="tk">Warning sign · ${ev.horizon}-term</span>${esc(ev.text)}`, 'bad', 7000); break;
+        case 'milestone': {
+          A.play('milestone'); FX.flash('#fbbf24');
+          const r = $('boardWrap').getBoundingClientRect();
+          FX.burst(r.left + r.width / 2, r.top + r.height / 2, null, 60);
+          T(ev.kind === 'model' ? `<span class="tk">New model · capability ${ev.at}</span><b>${esc(S.company)} ${esc(ev.name)}</b><br>${esc(ev.blurb)}` : `<span class="tk">Valuation milestone</span><b>${esc(ev.name)}</b><br>${esc(ev.blurb)}`, 'legendary', 7000);
+          break;
+        }
+        case 'era': { const era = FL.ERAS.find((x) => x.id === ev.era); A.play('milestone'); T(`<span class="tk">A new era begins</span><b>${esc(era.name)}</b><br>${esc(era.blurb)}`, 'legendary', 9000); break; }
+        case 'funding': A.play(ev.round.ok ? 'cash' : 'crisis'); T(`<span class="tk">${esc(ev.round.name)}</span>${esc(ev.round.text)}`, ev.round.ok ? 'good' : 'bad', 7000); break;
+        case 'bridge': A.play('warn'); T(esc(ev.text), 'bad', 7000); break;
+        case 'objective': A.play(ev.done ? 'chime' : 'warn'); T(`<span class="tk">Objective ${ev.done ? 'complete' : 'missed'}</span>${esc(ev.text)}`, ev.done ? 'good' : 'bad', 4500); break;
+        case 'note': T(`<span class="tk">Analyst note</span>${esc(ev.text)}<br><span class="muted">Could be right. Could be wrong.</span>`, 'info', 8000); break;
+        case 'intel': feed(`<b>Intel</b> new read on ${esc(ev.rival)} (${esc(ev.source)})`); break;
+        case 'news': feed(`<b>Rival news</b> ${esc(ev.text)}`); break;
+        case 'hired': if (ev.auto) feed(`<b>Hired</b> ${esc(ev.name)}, ${esc(ev.headline)}`); break;
+        case 'left': T(`<span class="tk">Departure</span>${esc(ev.name)} — ${esc(ev.headline)}`, 'bad', 4500); break;
+        case 'leak': A.play('warn'); T('<span class="tk">Leak</span>Internal documents just reached the press.', 'bad', 5000); break;
+        case 'offer': feed(`<b>Compute deal on the table</b> ${esc(ev.provider)}: ${esc(ev.kind)}`); break;
+        case 'campaign': A.play(ev.best ? 'chime' : ev.worst ? 'warn' : 'click'); T(`<span class="tk">Campaign · ${esc(ev.name)}</span>${esc(ev.label)}`, ev.best ? 'good' : ev.worst ? 'bad' : 'info', 6000); break;
+        case 'newGen': T(`<span class="tk">New chips</span>${esc(ev.name)} accelerators are shipping. Everything you own just got older.`, 'info', 6000); break;
+        case 'leaseEnded': feed(`<b>Lease ended</b> ${esc(ev.name)}`); break;
+        case 'paused': T('<span class="tk">Responsible Scaling Policy</span>Capability has outrun safety. Scaling slowed to a crawl.', 'bad', 6000); break;
+        case 'unlock': recordUnlocks({ artifacts: ev.artifact ? [ev.artifact] : [], achievements: ev.achievement ? [ev.achievement] : [] }); break;
+        case 'newspaper': {
+          const r = (S.newspapers || [])[S.newspapers.length - 1];
+          if (r) { lastReport = r; showNewsCard(r); renderTicker(); }
+          break;
+        }
+        case 'ending': handleEnding(ev.ending); break;
       }
     }
-    if (!period || left == null) { badge.classList.add('hidden'); return; }
-    badge.classList.remove('hidden');
-    badge.classList.toggle('urgent', !paused && left < 8000);
-    badge.innerHTML = `<span>${E.quarterLabel(S.turn)}</span><b>${paused ? 'Paused' : fmtSecs(left)}</b>
-      <div class="cbar2"><span style="width:${Math.max(0, Math.min(100, (1 - left / period) * 100))}%"></span></div>
-      ${canPause ? `<button class="btn" data-action="togglePause">${paused && (MP.active() || clock.paused) ? 'Resume' : 'Pause'}</button>` : ''}`;
   }
-  setInterval(clockLoop, 250);
+
+  /** Low-stakes events go to the ticker rather than interrupting. */
+  let feedItems = [];
+  function feed(html) {
+    feedItems.unshift(html);
+    feedItems = feedItems.slice(0, 6);
+    renderTicker();
+  }
+
+  function showNewsCard(r) {
+    const h = r.headline || {};
+    const box = $('newsCard');
+    box.innerHTML = `<div class="paper mini ${h.tabloid ? 'tabloid' : ''}" data-action="openNews" data-arg="${r.turn}"><div class="mast"><span>${esc(r.label)}</span><b>${esc(h.paper || 'The Ledger')}</b></div>
+      <h1>${esc(h.head || r.label)}</h1><p>${esc(h.sub || '')}</p><span class="muted">Click to read the full edition</span></div>`;
+    box.classList.remove('hidden');
+    clearTimeout(showNewsCard.t);
+    showNewsCard.t = setTimeout(() => box.classList.add('hidden'), 14000);
+  }
+
+  function liveRender() {
+    UI.renderTopbar();
+    UI.renderLeft();
+    UI.renderBoard();
+    renderInbox();
+    // Refresh the inspector unless the player is in the middle of using it.
+    const ae = document.activeElement;
+    if (++ticksSinceInspect >= 2 && !(ae && (ae.id === 'lvl' || ae.tagName === 'INPUT' || ae.tagName === 'SELECT'))) {
+      ticksSinceInspect = 0;
+      UI.inspect(selected);
+      if (selected && E.nodeType(selected) === 'policy') updatePolicyPreview(E.node(selected).def);
+    }
+    A.setTension(S.tension || 0);
+  }
+
+  let lastInboxPaint = 0;
+  function gameLoop(now) {
+    requestAnimationFrame(gameLoop);
+    const dtMs = lastFrame ? Math.min(400, now - lastFrame) : 0;
+    lastFrame = now;
+    if (!S || S.ended || (document.hidden && !MP.active())) return;
+    let n = 0;
+    if (MP.active()) {
+      if (MP.isHost()) {
+        loopAcc += dtMs * (MP.lobby.settings.speed || 1);
+        while (loopAcc >= WEEK_MS && n < 6 && !S.ended) { const r = E.tick(S); if (r) lastReport = r; loopAcc -= WEEK_MS; n++; }
+        MP.hostTickBots(S.week);
+        if (now - lastClockSent > 1000) { lastClockSent = now; MP.broadcastClock(S.week + loopAcc / WEEK_MS); }
+      } else {
+        const target = MP.targetWeek(WEEK_MS);
+        while (S.week < Math.floor(target) && n < 6 && !S.ended) { const r = E.tick(S); if (r) lastReport = r; n++; }
+        loopAcc = Math.max(0, Math.min(WEEK_MS - 1, (target - S.week) * WEEK_MS));
+      }
+      MP.maybeSnap(S);
+    } else {
+      loopAcc += dtMs * speed;
+      while (loopAcc >= WEEK_MS && n < 6 && !S.ended) { const r = E.tick(S); if (r) lastReport = r; loopAcc -= WEEK_MS; n++; }
+    }
+    if (n) {
+      handleEvents();
+      liveRender();
+      if (now - lastSave > 5000) { lastSave = now; save(); }
+    } else if (S.inbox.length && now - lastInboxPaint > 500) {
+      lastInboxPaint = now;
+      renderInbox();
+    }
+    const qp = $('qprog');
+    if (qp) qp.style.width = Math.min(100, ((E.weekOfQuarter(S) + loopAcc / WEEK_MS) / E.TICKS_PER_Q) * 100) + '%';
+  }
+  requestAnimationFrame(gameLoop);
 
   // ── API used by the CLI bridge (js/bridge.js) ───────────
   UI.state = () => S;
@@ -1252,12 +1294,11 @@
     }
     return r;
   };
-  UI.endQuarter = () => new Promise((resolve) => actions.endTurn(null, null, resolve));
-  UI.choose = (i) => actions.choose(i);
+  UI.setSpeed = (v) => actions.setSpeed(v);
+  UI.speed = () => (MP.active() ? MP.lobby.settings.speed : speed);
   UI.dismiss = function () {
     for (let k = 0; k < 6 && !$('modal').classList.contains('hidden'); k++) {
-      if (S && S.pendingDilemma && $('modalCard').querySelector('[data-action=choose]')) break;
-      const b = $('modalCard').querySelector('[data-action=afterReport], [data-action=nextDilemma], [data-action=showEnd], [data-action=closeModal]');
+      const b = $('modalCard').querySelector('[data-action=showEnd], [data-action=closeModal]');
       if (!b) break;
       actions[b.dataset.action](b.dataset.arg);
     }
@@ -1299,6 +1340,7 @@
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === ' ' && S && !(e.target && /INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))) { e.preventDefault(); actions.togglePause(); return; }
+      if (/^[1-4]$/.test(e.key) && S && !MP.active() && !(e.target && e.target.tagName === 'INPUT')) { speed = [0.5, 1, 2, 4][+e.key - 1]; UI.renderTopbar(); return; }
       if (e.key === 'm' && !(e.target && e.target.tagName === 'INPUT')) { A.setMuted(!A.isMuted()); if (S) UI.renderTopbar(); return; }
       if (e.key === 'Escape' && !$('modal').classList.contains('hidden') && S && !S.pendingDilemma && !S.ended) closeModal();
       else if (e.key === 'Escape' && S) { selected = null; UI.renderAll(); }

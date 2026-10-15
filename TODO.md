@@ -6,6 +6,13 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Post the launch drafts in docs/launch/ (needs the owner; not automated)
 - [ ] Set the repo's social preview image to assets/social-preview.png (GitHub Settings → General; no API)
 
+## Next: Plague Inc-style world layer
+- [ ] World map: adoption spreads region by region (US, EU, China, India, Gulf, LatAm, Africa, SEA) with different appetites
+- [ ] Regions react on their own: probes, bans, AI acts (like countries closing borders), sovereign AI programs
+- [ ] A global "treaty" progress bar, like Plague Inc's cure: if it completes, frontier scaling is frozen
+- [ ] Clickable opportunity bubbles on the map (bandwidth, intel, talent) that expire if ignored
+- [ ] Map-based fog: what each region knows about you and your rivals
+
 ## Next (multiplayer)
 - [ ] Player-to-player interactions: poach staff, bid on the same compute deals, targeted leaks, alliances
 - [ ] Host migration and reconnect-to-match
@@ -30,7 +37,10 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Localization (Italian first)
 
 ## Done
-- [x] Real-time pace (single-player option; default in multiplayer) with pause and default-on-timeout decisions
+- [x] True real time: weekly ticks, no turns, decision inbox with deadlines and defaults, speed control, live events and newspaper feed
+- [x] Fog of war: rival estimates from releases, leaks and intel; safety as an eval estimate; trust as a poll; qualitative effects with confidence; Competitive Intelligence policy
+- [x] Hidden worlds: randomized effect strengths and 2-3 secret traits per run, with unreliable analyst notes; revealed at the end
+- [x] Real-time multiplayer: host clock, public-only snapshots
 - [x] Peer-to-peer multiplayer: lobbies, invite links, AI lab seats, chat, shared race, CLI support
 - [x] In-game marketing: Brand stat, Marketing category, 9 campaigns with quarter-end results, launch-day strategy, PR damping
 - [x] Marketing for the game: GitHub Pages, press kit, launch drafts, share-your-run, screenshots + social preview, meta tags

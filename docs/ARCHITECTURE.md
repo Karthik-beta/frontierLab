@@ -34,11 +34,31 @@ Every policy, stat, indicator, stakeholder and situation is a **node**. Data fil
 Source values: active policy = `0.2 + 0.8 * level`, inactive = 0; stats in [0,1]; stakeholders in [-1,1];
 situations 0/1. Curves: `lin`, `sqrt`, `sq`, `ctr` (maps [0,1] to [-1,1]), `inv`.
 
-## Turn order (`E.endTurn`)
+## Time (`E.tick`)
 
-finances → hardware update → hiring update → capability + rivals → indicators → network → shocks decay →
-situations → bandwidth → funding round → bankruptcy/bridge → board coup → injunction → next turn →
-`Systems.run` (milestones, triggers, pitfalls, objectives, era, epigraph, headline) → ending check → dilemma roll.
+The game runs in real time. `E.tick(state)` advances one game week (dt = 1/13 quarter). Every rate
+(cash, capability, rivals, failures, attrition, pitfall meters, decision arrivals) is per quarter,
+scaled by dt. Each tick:
+
+finances → hardware → hiring → marketing → capability + rivals → indicators → network (lags scale with dt) →
+shocks decay → situations → bandwidth → bankruptcy/bridge → World (hints) → Fog (intel) → Systems.tick
+(milestones, triggers, pitfalls, objectives, era) → decision arrivals → week++ → expire decisions →
+quarter boundary every 13 weeks (`E.quarterBoundary`: funding, board, injunction, history, newspaper) →
+ending check.
+
+`E.endTurn(state)` runs ticks until the quarter ends. The simulator, bots and tests use it.
+The UI runs ticks from a `requestAnimationFrame` loop (2 s per week at 1x) and drains
+`state.events` into notifications. Decisions live in `state.inbox` with deadlines; `E.defaultOption`
+applies when one expires.
+
+## Hidden world and fog
+
+- `js/world.js`: per-run edge multipliers (0.6–1.4) and 2–3 secret traits (`js/data/world.js`),
+  plus analyst notes, about a third of which are false.
+- `js/fog.js`: everything the player and the CLI see. Rival estimates come from releases, leaks
+  and intel, with error that grows over time. Safety is an eval estimate (biased high without audits)
+  and trust is a poll. Effects are qualitative labels whose confidence grows with experience.
+  The `lead` indicator, which drives markets, uses the *perceived* race.
 
 ## Determinism
 

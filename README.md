@@ -43,8 +43,9 @@ into the game's advisor panel with `./frontier say`.
 | —                    | Marketing: brand vs hype, campaigns (Super Bowl in Q1 only), launch strategy |
 | —                    | Multiplayer: real-time, peer to peer, friends + AI labs, chat        |
 
-There are three difficulties (**Easy**, **Normal**, **Realistic**) and two paces (**Turn-based** or
-**Real-time** with pause).
+It runs in **real time**: the clock never stops for you, decisions expire, and you never see the
+whole picture. Rivals are estimates, your own safety is an eval estimate, and every run has a hidden
+world with its own rules. There are three difficulties: **Easy**, **Normal** and **Realistic**.
 
 ![Quarterly report with a real quote](assets/screenshot-report.png)
 

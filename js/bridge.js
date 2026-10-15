@@ -34,14 +34,14 @@
   /** Compact state snapshot for `frontier status`. */
   B.snapshot = function () {
     const s = S();
-    const v = s.values;
+    const fog = FL.Fog.view(s);
     const runway = s.finance.net >= 0 ? null : s.cash / -s.finance.net;
     const d = {
-      company: s.company, quarter: E.quarterLabel(s.turn), turn: s.turn, maxTurns: E.MAX_TURNS, difficulty: s.difficulty, era: Sys.eraOf(s).name,
+      company: s.company, quarter: E.quarterLabel(s.turn), week: E.weekOfQuarter(s) + 1, turn: s.turn, maxTurns: E.MAX_TURNS, difficulty: s.difficulty, era: Sys.eraOf(s).name, speed: FL.UI.speed(),
       cash: s.cash, net: s.finance.net, revenue: s.finance.revenue, runwayQuarters: runway, valuation: s.valuation, nextRoundIn: s.nextRound - s.turn,
       bandwidth: s.bandwidth, bandwidthIncome: E.bandwidthIncome(s), ownership: s.ownership,
-      capability: s.cap, rivals: s.rivals.map((r) => ({ name: r.name, capability: r.cap })),
-      stats: Object.fromEntries(FL.STATS.concat(FL.INDICATORS).map((x) => [x.id, +v[x.id].toFixed(3)])),
+      capability: +s.cap.toFixed(1), rivals: fog.rivals, analystNotes: fog.notes,
+      stats: fog.stats,
       stakeholders: Object.fromEntries(FL.STAKEHOLDERS.map((x) => [x.id, +s.happiness[x.id].toFixed(3)])),
       approval: E.approval(s), investorConfidence: E.investorConfidence(s),
       situations: FL.SITUATIONS.filter((x) => s.active[x.id]).map((x) => ({ id: x.id, name: x.name, good: x.good, quarters: s.active[x.id] })),
@@ -49,21 +49,31 @@
       risks: Sys.risks(s).map((r) => ({ id: r.id, name: r.name, horizon: r.horizon, meter: +r.meter.toFixed(2), warning: r.warn })),
       hiddenRisks: Sys.hiddenRiskCount(s), rumors: Sys.rumors(s).map((r) => r.name),
       policies: Object.entries(s.policies).map(([id, p]) => ({ id, name: nameOf(id), level: p.level, costPerQuarter: E.policyCost(s, id) })),
-      pendingDecision: s.pendingDilemma || null, offers: s.hw ? s.hw.offers.length : 0, candidates: s.people ? s.people.feed.length : 0,
+      inbox: inboxData(s), offers: s.hw ? s.hw.offers.length : 0, candidates: s.people ? s.people.feed.length : 0,
       team: s.people ? s.people.roster.length : 0, toxicity: s.people ? s.people.toxicity : 0, ended: s.ended || null,
     };
     return d;
   };
 
+  function inboxData(s) {
+    return s.inbox.map((item) => {
+      const d = FL.DILEMMAS.find((x) => x.id === item.id);
+      return { id: item.uid, title: d.title, text: d.text, pitfall: !!d.pitfall, weeksLeft: Math.max(0, item.deadline - s.week), defaultOption: E.defaultOption(d) + 1,
+        options: d.options.map((o, i) => ({ n: i + 1, label: o.label, desc: o.desc })) };
+    });
+  }
+  const statTxt = (st, k) => (typeof st[k] === 'object' ? `~${Math.round(st[k].est * 100)}±${Math.round(st[k].plusMinus * 100)}` : Math.round(st[k] * 100));
+
   function statusText(d) {
     const L = [];
-    L.push(`${d.company} — ${d.quarter} (turn ${d.turn}/${d.maxTurns}) · ${d.difficulty} · ${d.era}`);
+    L.push(`${d.company} — ${d.quarter}, week ${d.week} (quarter ${d.turn}/${d.maxTurns}) · ${d.difficulty} · ${d.era} · speed ${d.speed}x (real time)`);
     if (d.ended) L.push(`GAME OVER: ${d.ended.title}. ${d.ended.text}`);
     L.push(`Cash ${money(d.cash)} · Net ${money(d.net)}/q · Runway ${d.runwayQuarters == null ? 'profitable' : d.runwayQuarters.toFixed(1) + 'q'} · Valuation ${money(d.valuation)} · Next round in ${d.nextRoundIn}q · You own ${d.ownership.toFixed(1)}%`);
-    L.push(`Bandwidth ${d.bandwidth} (+${d.bandwidthIncome}/q) · Approval ${spct(d.approval)} · Investor confidence ${spct(d.investorConfidence)}`);
-    L.push(`Capability ${d.capability.toFixed(1)} vs ${d.rivals.map((r) => `${r.name} ${r.capability.toFixed(1)}`).join(', ')}`);
+    L.push(`Bandwidth ${Math.floor(d.bandwidth)} (+${d.bandwidthIncome}/q) · Approval ${spct(d.approval)} · Investor confidence ${spct(d.investorConfidence)}`);
+    L.push(`Capability ${d.capability} vs estimates: ${d.rivals.map((r) => `${r.name} ~${r.estimate}±${r.plusMinus} (${r.source})`).join(', ')}`);
     const st = d.stats;
-    L.push('Stats: ' + ['compute', 'talent', 'morale', 'velocity', 'safety', 'quality', 'adoption', 'monetization', 'hype', 'trust', 'regHeat', 'legal', 'security', 'data', 'openness'].map((k) => `${nameOf(k)} ${Math.round(st[k] * 100)}`).join(' · '));
+    L.push('Stats: ' + ['compute', 'talent', 'morale', 'velocity', 'safety', 'quality', 'adoption', 'monetization', 'hype', 'brand', 'trust', 'regHeat', 'legal', 'security', 'data', 'openness'].map((k) => `${nameOf(k)} ${statTxt(st, k)}`).join(' · '));
+    d.analystNotes.forEach((n) => L.push('Analyst note (unverified): ' + n));
     L.push('Stakeholders: ' + Object.entries(d.stakeholders).map(([k, h]) => `${nameOf(k)} ${spct(h)}`).join(' · '));
     if (d.situations.length) L.push('Situations: ' + d.situations.map((x) => `${x.name}${x.good ? ' (good)' : ''} ${x.quarters}q`).join(', '));
     if (d.rumors.length) L.push('Rumors: ' + d.rumors.join(', '));
@@ -71,7 +81,7 @@
     d.risks.forEach((r) => L.push(`Risk [${r.horizon}] ${r.name} ${pct(r.meter)}: ${r.warning}`));
     if (d.hiddenRisks) L.push(`${d.hiddenRisks} more risk(s) building out of sight.`);
     L.push(`Team ${d.team} · Culture toxicity ${pct(d.toxicity)} · Candidates ${d.candidates} · Compute deals ${d.offers}`);
-    if (d.pendingDecision) L.push(`DECISION WAITING: run "frontier dilemma".`);
+    d.inbox.forEach((x) => L.push(`DECISION #${x.id} (${x.weeksLeft} weeks left${x.pitfall ? ', pitfall' : ''}): ${x.title} — see "frontier inbox"`));
     return L.join('\n');
   }
 
@@ -83,22 +93,25 @@
       const p = s.policies[id];
       L.push(p ? `Active at ${pct(p.level)} · costs ${money(E.policyCost(s, id))}/q` : `Not enacted · enact costs ${d.intro} bandwidth · ${money(E.policyCost(s, id, 0.5))}/q at 50%`);
       L.push(`Slider: ${d.lo} (0) → ${d.hi} (100)`);
-      L.push('Effects at current/50% level:');
+      L.push('Expected effects (qualitative; this world may differ):');
       const src = 0.2 + 0.8 * (p ? p.level : 0.5);
-      E.effectsFrom(id).forEach((e) => L.push(`  ${nameOf(e.to)} ${e.k * E.curve(e.curve, src) >= 0 ? '+' : ''}${(e.k * E.curve(e.curve, src) * 100).toFixed(1)}${e.lag >= 4 ? ' (slow)' : ''}`));
+      E.effectsFrom(id).forEach((e) => { const l = FL.Fog.effectLabel(s, e, src); L.push(`  ${nameOf(e.to)}: ${l.text}, confidence ${l.confidence}${e.lag >= 4 ? ', slow' : ''}`); });
       return L.join('\n');
     }
-    const val = n.type === 'stakeholder' ? spct(s.happiness[id]) : n.type === 'situation' ? (s.active[id] ? 'ACTIVE' : 'dormant') + `, pressure ${Math.round(s.pressure[id] * 100)} (starts ${Math.round(d.on * 100)})` : id === 'capability' ? s.cap.toFixed(1) : pct(s.values[id]);
+    const m = FL.Fog.measured(s, id);
+    const pr = n.type === 'situation' ? s.pressure[id] : 0;
+    const val = n.type === 'stakeholder' ? spct(s.happiness[id]) : n.type === 'situation' ? (s.active[id] ? 'ACTIVE' : 'dormant') + `, pressure ${pr > d.on ? 'past the tipping point' : pr > d.on * 0.85 ? 'close to tipping' : pr > d.on * 0.6 ? 'building' : 'low'}` : id === 'capability' ? s.cap.toFixed(1) : m.sd ? `~${pct(m.est)} ±${Math.round(160 * m.sd)} (${m.kind})` : pct(s.values[id]);
     L.push('Value: ' + val);
     const extras = Object.entries(s.extra || {}).map(([k, m]) => [k, m[id]]).filter(([, x]) => x && Math.abs(x) > 0.002);
     const live = E.effectsInto(id).map((e) => [e, E.contribution(s, e)]).filter(([, c]) => Math.abs(c) > 0.002).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
     if (extras.length || live.length) L.push('Driven by:');
-    extras.forEach(([k, x]) => L.push(`  ${(E.extraInputs.find((i) => i.id === k) || {}).label || k} ${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}`));
-    live.forEach(([e, c]) => L.push(`  ${nameOf(e.from)} ${c >= 0 ? '+' : ''}${(c * 100).toFixed(1)}`));
+    const sz = (c) => { const a = Math.abs(c); return (c >= 0 ? 'pushes up ' : 'pulls down ') + (a < 0.015 ? 'barely' : a < 0.05 ? 'a little' : a < 0.11 ? 'moderately' : 'strongly'); };
+    extras.forEach(([k, x]) => L.push(`  ${(E.extraInputs.find((i) => i.id === k) || {}).label || k}: ${sz(x)}`));
+    live.forEach(([e, c]) => L.push(`  ${nameOf(e.from)}: ${sz(c)}`));
     const levers = E.effectsInto(id).filter((e) => E.nodeType(e.from) === 'policy' && !s.policies[e.from]);
     if (levers.length) L.push('Policies you could enact: ' + levers.map((e) => `${nameOf(e.from)} (${e.k > 0 ? '+' : '-'})`).join(', '));
     const outs = E.effectsFrom(id).filter((e) => Math.abs(E.contribution(s, e)) > 0.002);
-    if (outs.length) L.push('Affects: ' + outs.map((e) => `${nameOf(e.to)} ${E.contribution(s, e) >= 0 ? '+' : ''}${(E.contribution(s, e) * 100).toFixed(1)}`).join(', '));
+    if (outs.length) L.push('Affects: ' + outs.map((e) => `${nameOf(e.to)} (${E.contribution(s, e) >= 0 ? 'up' : 'down'})`).join(', '));
     return L.join('\n');
   }
 
@@ -107,7 +120,9 @@
     const L = [`${r.label} in review`];
     if (r.headline) L.push(`${r.headline.paper}: "${r.headline.head}" — ${r.headline.sub}`);
     const f = r.finance;
-    L.push(`Revenue ${money(f.revenue)} · Costs ${money(f.costs)} · Net ${money(f.net)} · Capability +${r.capGain.toFixed(1)}`);
+    L.push(`Revenue ${money(f.revenue)} · Costs ${money(f.costs)} · Net ${money(f.net)} · Capability +${(r.capGain || 0).toFixed(1)}`);
+    (r.notes || []).forEach((n) => L.push('Analyst note (unverified): ' + n));
+    (r.expired || []).forEach((n) => L.push(n));
     if (r.funding) L.push(`Funding: ${r.funding.text}`);
     if (r.bridge) L.push(r.bridge);
     (r.started || []).forEach((id) => L.push(`Situation started: ${nameOf(id)}`));
@@ -123,30 +138,32 @@
     (r.campaigns || []).forEach((c) => L.push(`Campaign ${c.name}: ${c.label}`));
     if (r.hardware && r.hardware.newGen) L.push(`${r.hardware.newGen} chips are now shipping.`);
     if (r.people && r.people.left.length) L.push('Departures: ' + r.people.left.join(', '));
-    (r.deltas || []).slice(0, 6).forEach((d) => L.push(`  ${d.name}: ${Math.round(d.from * 100)} → ${Math.round(d.to * 100)}`));
+    (r.deltas || []).filter((d) => !FL.Fog.FOGGY.includes(d.id) && d.id !== 'lead').slice(0, 6).forEach((d) => L.push(`  ${d.name}: ${Math.round(d.from * 100)} → ${Math.round(d.to * 100)}`));
     if (r.ending) L.push(`GAME OVER — ${r.ending.title}: ${r.ending.text}`);
-    if (S().pendingDilemma) L.push('A decision is waiting: run "frontier dilemma".');
+    if (S().inbox.length) L.push(`${S().inbox.length} decision(s) waiting: run "frontier inbox".`);
     return L.join('\n');
   }
 
-  function dilemmaText() {
-    const s = S();
-    const d = FL.DILEMMAS.find((x) => x.id === s.pendingDilemma);
-    if (!d) return 'No decision is waiting.';
-    const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
-    return [`${pit ? `[Pitfall · ${pit.horizon}-term] ` : ''}${d.title}`, d.text, ...d.options.map((o, i) => `  ${i + 1}. ${o.label} — ${o.desc}`), 'Choose with: frontier choose <number>'].join('\n');
+  function inboxText() {
+    const items = inboxData(S());
+    if (!items.length) return 'The inbox is empty. The clock is running.';
+    return items.map((x) => [`#${x.id} ${x.pitfall ? '[Pitfall] ' : ''}${x.title} — ${x.weeksLeft} weeks left (default: option ${x.defaultOption})`, x.text,
+      ...x.options.map((o) => `  ${o.n}. ${o.label} — ${o.desc}`)].join('\n')).join('\n\n') + '\n\nDecide with: frontier decide <#id> <option>';
   }
 
   const HELP = `frontier — drive the Frontier browser game from the terminal.
   status                      Company overview (add --json for machine-readable)
-  report                      Last quarter's report
+  report                      Last quarter's report (same as news)
   inspect <id|name>           Any stat, policy, stakeholder or situation, with what drives it
   policies [category]         All policies with status and costs
   enact <policy> [0-100]      Enact a policy (default 50)
   set <policy> <0-100>        Change an active policy's slider
   cancel <policy>             Cancel a policy
-  end                         End the quarter
-  dilemma | choose <n>        Show / answer the pending decision
+  inbox                       Decisions waiting (they expire; the clock never stops)
+  decide <#id> <n>            Answer one (choose <n> answers the oldest)
+  speed <0|0.5|1|2|4>         Game speed (0 pauses, single-player only)
+  wait <weeks>                Let game time pass, then report what changed
+  news                        The latest quarterly newspaper
   continue                    Dismiss whatever modal is open in the browser
   objectives | risks          Objectives and the risk radar
   candidates | offer <id> | pass <id> | team
@@ -200,22 +217,32 @@
         const r = U.policyChange(id, lvl);
         return r.ok ? { ok: true, text: `${cmd === 'cancel' ? 'Cancelled' : cmd === 'enact' ? 'Enacted' : 'Set'} ${nameOf(id)}${lvl != null ? ' at ' + pct(lvl) : ''}. Bandwidth left: ${S().bandwidth}. Net now ${money(S().finance.net)}/q.` } : fail(r.reason);
       }
-      case 'end': case 'next': {
-        if (s.ended) return fail('The game is over. Start a new one with: frontier new');
-        if (s.pendingDilemma) return fail('Resolve the waiting decision first: frontier dilemma');
-        const r = await U.endQuarter();
-        return { ok: true, text: reportText(r), data: r };
+      case 'end': case 'next':
+        return fail('Frontier runs in real time: there are no turns. Use "frontier speed <x>", "frontier wait <weeks>", and answer "frontier inbox" before decisions expire.');
+      case 'inbox': case 'dilemma': case 'decision': return { ok: true, text: inboxText(), data: inboxData(s) };
+      case 'decide': case 'choose': {
+        const uid = cmd === 'choose' ? (s.inbox[0] || {}).uid : parseInt(String(args[0] || '').replace('#', ''), 10);
+        const n = parseInt(cmd === 'choose' ? args[0] : args[1], 10);
+        if (uid == null || !s.inbox.some((x) => x.uid === uid)) return fail('No such decision in the inbox (it may have expired).');
+        const r = U.decide(uid, n - 1);
+        if (!r.ok) return fail(r.reason);
+        return { ok: true, text: [`${r.dilemma.options[n - 1].label}: ${r.res.text}`, r.pitfall ? `History: ${r.pitfall.history}\nLesson: ${r.pitfall.lesson}` : '', r.res.ending ? `GAME OVER — ${r.res.ending.title}: ${r.res.ending.text}` : ''].filter(Boolean).join('\n'), data: r.res };
       }
-      case 'dilemma': case 'decision': return { ok: true, text: dilemmaText(), data: { id: s.pendingDilemma } };
-      case 'choose': {
-        if (!s.pendingDilemma) return fail('No decision is waiting.');
-        const d = FL.DILEMMAS.find((x) => x.id === s.pendingDilemma);
-        const i = parseInt(args[0], 10) - 1;
-        if (!(i >= 0 && i < d.options.length)) return fail(`Choose 1-${d.options.length}.`);
-        const res = U.choose(i);
-        const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
-        return { ok: true, text: [`${d.options[i].label}: ${res.text}`, pit ? `History: ${pit.history}\nLesson: ${pit.lesson}` : '', res.ending ? `GAME OVER — ${res.ending.title}: ${res.ending.text}` : '', S().pendingDilemma ? 'Another decision is waiting: frontier dilemma' : ''].filter(Boolean).join('\n'), data: res };
+      case 'speed': {
+        const v = parseFloat(args[0]);
+        if (![0, 0.5, 1, 2, 4].includes(v)) return fail('Speeds: 0 (pause), 0.5, 1, 2, 4');
+        U.setSpeed(v);
+        return { ok: true, text: `Speed is now ${U.speed()}x.` };
       }
+      case 'wait': {
+        const weeks = Math.max(1, Math.min(13, parseInt(args[0] || '1', 10)));
+        const start = s.week, target = s.week + weeks;
+        const t0 = Date.now();
+        while (S().week < target && !S().ended && Date.now() - t0 < 17000) await new Promise((r) => setTimeout(r, 150));
+        const passed = S().week - start;
+        return { ok: true, text: `${passed} week(s) passed${passed < weeks ? ' (stopped early; is the game paused or slow?)' : ''}.\n\n` + statusText(B.snapshot()), data: B.snapshot() };
+      }
+      case 'news': return { ok: true, text: reportText(U.lastReport()), data: U.lastReport() };
       case 'continue': U.dismiss(); return { ok: true, text: 'Dismissed.' };
       case 'pause': case 'resume': U.act('togglePause'); return { ok: true, text: 'Toggled pause.' };
       case 'lobby': { const L = FL.Multiplayer.lobby; return L ? { ok: true, data: L, text: `Lobby ${L.code} · ${L.started ? 'quarter ' + E.quarterLabel(L.turn) : 'not started'} · ${L.settings.mode === 'realtime' ? 'real-time ' + L.settings.secondsPerQuarter + 's' : 'turn-based'}\n` + L.players.map((p) => `${p.company}${p.bot ? ' (AI)' : ''} — ${p.name} · cap ${Math.floor(p.cap)}${p.ready ? ' · ready' : ''}${p.ended ? ' · ' + p.ended.title : ''}`).join('\n') } : fail('Not in a lobby.'); }
