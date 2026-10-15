@@ -362,6 +362,7 @@
     const news = [];
     const boost = E.rivalBoost(state), slow = E.rivalSlow(state);
     for (const r of state.rivals) {
+      if (r.remote) continue; // other players' labs are updated from their own snapshots
       let rate = r.rate * (1 + 0.012 * t) * E.diff(state).rivalPace;
       if (r.cap < state.cap - 15) rate *= 1.2; // fast followers distill the leader
       const before = r.cap;

@@ -157,6 +157,8 @@
   campaigns | book <id> | unbook <id>   Marketing campaigns (results at quarter end)
   archive                     Your collection
   say <message>               Show an advisor note in the browser
+  pause | resume              Real-time clock (single-player, or the host in multiplayer)
+  lobby | chat <message>      Multiplayer lobby status and chat
   new <origin> [difficulty] [name]   Start a new game`;
 
   /** Execute one CLI command against the live game. */
@@ -215,6 +217,9 @@
         return { ok: true, text: [`${d.options[i].label}: ${res.text}`, pit ? `History: ${pit.history}\nLesson: ${pit.lesson}` : '', res.ending ? `GAME OVER — ${res.ending.title}: ${res.ending.text}` : '', S().pendingDilemma ? 'Another decision is waiting: frontier dilemma' : ''].filter(Boolean).join('\n'), data: res };
       }
       case 'continue': U.dismiss(); return { ok: true, text: 'Dismissed.' };
+      case 'pause': case 'resume': U.act('togglePause'); return { ok: true, text: 'Toggled pause.' };
+      case 'lobby': { const L = FL.Multiplayer.lobby; return L ? { ok: true, data: L, text: `Lobby ${L.code} · ${L.started ? 'quarter ' + E.quarterLabel(L.turn) : 'not started'} · ${L.settings.mode === 'realtime' ? 'real-time ' + L.settings.secondsPerQuarter + 's' : 'turn-based'}\n` + L.players.map((p) => `${p.company}${p.bot ? ' (AI)' : ''} — ${p.name} · cap ${Math.floor(p.cap)}${p.ready ? ' · ready' : ''}${p.ended ? ' · ' + p.ended.title : ''}`).join('\n') } : fail('Not in a lobby.'); }
+      case 'chat': FL.Multiplayer.chat(args.join(' ')); return { ok: true, text: 'Sent.' };
       case 'objectives': { const d = B.snapshot().objectives; return { ok: true, data: d, text: d.map((o) => `${o.text} — ${nameOf(o.owner)}, ${o.quartersLeft}q left, ${pct(o.progress)} done${o.kind === 'hold' ? ' (checked at deadline)' : ''}`).join('\n') || 'No objectives right now.' }; }
       case 'risks': { const d = B.snapshot(); return { ok: true, data: d.risks, text: (d.risks.map((r) => `[${r.horizon}] ${r.name} ${pct(r.meter)} — ${r.warning}`).join('\n') || 'No visible warning signs.') + (d.hiddenRisks ? `\n${d.hiddenRisks} more building out of sight.` : '') + (d.rumors.length ? `\nRumors: ${d.rumors.join(', ')}` : '') }; }
       case 'candidates': {

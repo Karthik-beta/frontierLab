@@ -15,6 +15,16 @@
   let preview = {};       // policy id -> slider level not yet applied
   let pickedArch = FL.ARCHETYPES[0].id;
   let pickedDiff = 'normal';
+  const MP = FL.Multiplayer;
+  const joinPrefill = (() => { try { const q = new URLSearchParams(location.search); return { code: q.get('join') || '', kind: q.get('net') || 'internet' }; } catch (e) { return {}; } })();
+  let mpEndResolve = null;
+  let pickedPace = 'turns';
+  const PACES = [{ id: 'turns', name: 'Turn-based', secs: 0, blurb: 'Take as long as you like each quarter.' },
+    { id: 'slow', name: 'Real-time: slow', secs: 60, blurb: 'A quarter every 60 seconds.' },
+    { id: 'normal', name: 'Real-time: normal', secs: 40, blurb: 'A quarter every 40 seconds.' },
+    { id: 'fast', name: 'Real-time: fast', secs: 20, blurb: 'A quarter every 20 seconds. Good luck.' }];
+  const clock = { deadline: null, msLeft: null, paused: false };
+  let mpClock = { deadline: null, paused: false };
   const HW = FL.Hardware, HR = FL.Hiring;
   let lastReport = null;
   let celebrations = [];
@@ -259,8 +269,7 @@
       <div class="kpi"><span class="k">Cash</span><span class="v ${S.cash < 0 ? 'neg' : ''}">${money(S.cash)}</span></div>
       <div class="kpi"><span class="k">Net / quarter</span><span class="v ${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${money(net)}</span></div>
       <div class="kpi"><span class="k">Runway</span><span class="v ${rq < toRound + 1 ? 'neg' : rq < toRound + 3 ? 'warn' : ''}">${rq === Infinity ? 'Profitable' : rq.toFixed(1) + ' q'}</span></div>
-      <div class="kpi"><span class="k">Valuation</span><span class="v">${money(S.valuation)}</span></div>
-      <div class="kpi"><span class="k">Next round</span><span class="v">${toRound <= 0 ? 'This quarter' : 'in ' + toRound + ' q'}</span></div>
+      <div class="kpi" title="Next funding round ${toRound <= 0 ? 'this quarter' : 'in ' + toRound + ' quarters'}"><span class="k">Valuation · round ${toRound <= 0 ? 'now' : 'in ' + toRound + 'q'}</span><span class="v">${money(S.valuation)}</span></div>
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
@@ -269,7 +278,10 @@
       <button class="btn" data-action="compute">Compute${S.hw && S.hw.offers.length ? ` <b class="pos">${S.hw.offers.length} deal${S.hw.offers.length > 1 ? 's' : ''}</b>` : ''}</button>
       <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b></button>
       <button class="btn" data-action="gameMenu">Menu</button>
-      <button class="btn primary big" data-action="endTurn" ${S.ended ? 'disabled' : ''}>End quarter</button>`;
+      ${MP.active() ? `<button class="btn" data-action="mpLobby" title="Lobby and chat">Lobby ${esc(MP.lobby.code)}</button>` : ''}
+      ${MP.active() && MP.me() && MP.me().ready && !S.ended
+        ? `<button class="btn big" disabled>Waiting for ${MP.waitingFor().length}…</button>`
+        : `<button class="btn primary big" data-action="endTurn" ${S.ended ? 'disabled' : ''}>${MP.active() ? (MP.realtime() ? 'Ready (skip ahead)' : 'Ready') : 'End quarter'}</button>`}`;
   };
 
   UI.renderLeft = function () {
@@ -284,7 +296,7 @@
     const appr = E.approval(S);
     const conf = E.investorConfidence(S);
     const racers = [{ name: 'You', cap: S.cap, color: '#7dd3fc' }].concat(S.rivals).sort((a, b) => b.cap - a.cap);
-    const race = racers.map((r) => `<div class="race-row"><div class="lbl"><span>${esc(r.name)}</span><b>${Math.floor(r.cap)}</b></div>
+    const race = racers.map((r) => `<div class="race-row"><div class="lbl"><span>${esc(r.name)}${r.player ? ` <span class="muted">· ${esc(r.player)}</span>` : ''}</span><b>${Math.floor(r.cap)}</b></div>
       <div class="rbar"><span style="width:${Math.min(100, r.cap)}%;background:${r.color}"></span></div></div>`).join('');
     const board = S.happiness.board;
     const objs = S.objectives.map((o) => {
@@ -547,11 +559,22 @@
       <input class="name-input" id="coName" value="${esc((saved && saved.company) || 'Frontier Labs')}" maxlength="32">
       <h3>Choose your origin story</h3>
       <div class="cards">${cards}</div>
+      <h3>Pace</h3>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">${PACES.map((p) => `
+        <button class="card ${p.id === pickedPace ? 'sel' : ''}" data-action="pickPace" data-arg="${p.id}"><h4>${esc(p.name)}</h4><p>${esc(p.blurb)}</p></button>`).join('')}</div>
       <h3>Difficulty</h3>
       <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${FL.DIFFICULTIES.map((d) => `
         <button class="card ${d.id === pickedDiff ? 'sel' : ''}" data-action="pickDiff" data-arg="${d.id}"><h4>${esc(d.name)}</h4><p>${esc(d.blurb)}</p></button>`).join('')}</div>
       <div class="btn-row"><button class="btn primary big" data-action="found">Found the company</button>
-        <button class="btn big" data-action="help">How to play</button></div>`);
+        <button class="btn big" data-action="help">How to play</button></div>
+      <h3>Multiplayer</h3>
+      <p class="note">Race friends' labs — or their Claude companions — peer to peer. Each of you runs your own company; quarters advance when everyone is ready.</p>
+      <div class="btn-row">
+        <button class="btn" data-action="mpHost" data-arg="internet">Host an online lobby</button>
+        <button class="btn" data-action="mpHost" data-arg="local">Host in this browser (tabs)</button>
+        <input class="name-input" id="joinCode" placeholder="Room code" maxlength="6" style="width:130px;text-transform:uppercase" value="${esc(joinPrefill.code || '')}">
+        <button class="btn" data-action="mpJoin">Join</button>
+      </div>`);
   };
 
   function helpHTML() {
@@ -703,6 +726,7 @@
   function startGame(state) {
     S = state;
     selected = null; hovered = null; preview = {}; lastReport = null; endingShown = false; celebrations = [];
+    clock.deadline = null; clock.msLeft = null; clock.paused = false;
     closeModal();
     UI.renderAll();
     save();
@@ -721,7 +745,13 @@
     menu: () => UI.showStart(),
     closeModal: () => closeModal(),
     pickArch: (id) => { pickedArch = id; document.querySelectorAll('.card[data-action=pickArch]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
-    found: () => startGame(E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff)),
+    found: () => { const g = E.newGame(pickedArch, ($('coName').value || 'Frontier Labs').trim(), undefined, pickedDiff); g.pace = pickedPace; startGame(g); },
+    pickPace: (id) => { pickedPace = id; document.querySelectorAll('.card[data-action=pickPace]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
+    togglePause: () => {
+      if (MP.active()) { if (MP.isHost()) MP.setPaused(!MP.lobby.paused); return; }
+      clock.paused = !clock.paused;
+      FX.toast(clock.paused ? 'Paused' : 'Resumed', 'info', 1200);
+    },
     pickDiff: (id) => { pickedDiff = id; document.querySelectorAll('.card[data-action=pickDiff]').forEach((c) => c.classList.toggle('sel', c.dataset.arg === id)); },
     continue: () => startGame(loadSave()),
     apply: (id) => {
@@ -746,6 +776,15 @@
     },
     endTurn: (arg, el, done) => {
       if (!S || S.ended || busy) return;
+      if (MP.active() && arg !== 'mp') {
+        if (S.pendingDilemma) return UI.showDilemma();
+        if (done) mpEndResolve = done;
+        MP.ready();
+        A.play('click');
+        UI.renderTopbar();
+        return;
+      }
+      if (MP.active()) MP.applySnapshots(S);
       busy = true;
       preview = {};
       A.play('endTurn');
@@ -768,6 +807,7 @@
         if (r.era) celebrations.push({ kicker: 'A new era begins', title: r.era.name, text: r.era.blurb });
         busy = false;
         UI.showReport(r);
+        if (MP.active()) MP.sendSnap(S, r);
         if (done) done(r);
       }, 1100);
     },
@@ -779,6 +819,29 @@
       else closeModal();
     },
     archive: (tab) => showArchive(tab || 'all'),
+    mpHost: async (kind) => {
+      try {
+        await MP.hostLobby({ kind, name: 'Host', company: ($('coName') && $('coName').value.trim()) || 'Frontier Labs', archetype: pickedArch, difficulty: pickedDiff });
+        showLobby();
+      } catch (e) { FX.toast(esc(e.message || e), 'bad'); }
+    },
+    mpJoin: async () => {
+      const code = ($('joinCode').value || '').trim().toUpperCase();
+      try {
+        FX.toast('Connecting…', 'info', 2000);
+        await MP.joinLobby(code, { kind: joinPrefill.code === code ? joinPrefill.kind : 'internet', name: 'Player', company: ($('coName') && $('coName').value.trim()) || 'Frontier Labs', archetype: pickedArch });
+        showLobby();
+      } catch (e) { FX.toast(esc(e.message || e), 'bad', 5000); }
+    },
+    mpLobby: () => showLobby(),
+    mpAddBot: () => MP.addBot(),
+    mpRemove: (id) => MP.removePlayer(id),
+    mpStart: () => MP.start(),
+    mpLeave: () => { MP.leave(); UI.showStart(); },
+    mpProfile: () => MP.setProfile({ name: $('mpName').value.trim() || 'Player', company: $('mpCompany').value.trim() || 'Frontier Labs', archetype: $('mpArch').value }),
+    mpSettings: () => MP.setSettings({ difficulty: $('mpDiff').value, aiRivals: $('mpAi').checked, mode: $('mpMode').value, secondsPerQuarter: +$('mpSecs').value }),
+    mpChat: () => { const i = $('mpChatIn'); if (i && i.value.trim()) { MP.chat(i.value.trim()); i.value = ''; } },
+    copyInvite: () => { try { navigator.clipboard.writeText(MP.inviteLink()); FX.toast('Invite link copied.', 'good', 2000); } catch (e) { /* ignore */ } },
     hiring: () => showHiring(),
     marketingMenu: () => showMarketing(),
     book: (id) => { const r = FL.Marketing.book(S, id); afterAction(r, r.ok ? 'Campaign booked. Results at quarter end.' : null); showMarketing(r.ok ? null : r.reason); if (r.ok) A.play('enact'); },
@@ -1066,6 +1129,102 @@
     track.style.animationDuration = Math.max(30, track.textContent.length / 6) + 's';
   }
 
+  // ── Multiplayer lobby ───────────────────────────────────
+  function showLobby() {
+    const L = MP.lobby;
+    if (!L) return UI.showStart();
+    const me = MP.me() || {};
+    const host = MP.isHost();
+    const rows = L.players.map((p) => `<li><span><i class="dot" style="background:${p.color || '#888'}"></i><b>${esc(p.company)}</b> <span class="muted">${esc(p.bot ? 'AI lab' : p.name)}${p.host ? ' · host' : ''}${p.id === MP.myId ? ' · you' : ''}${p.connected === false ? ' · disconnected' : ''}</span></span>
+      <span class="m">${esc((FL.ARCHETYPES.find((a) => a.id === p.archetype) || {}).name || '')}${L.started ? ` · cap ${Math.floor(p.cap)}${p.ended ? ' · ' + esc(p.ended.title) : p.ready ? ' · ready' : ''}` : ''}
+      ${host && !L.started && p.id !== MP.myId ? ` <button class="btn" data-action="mpRemove" data-arg="${p.id}">Remove</button>` : ''}</span></li>`).join('');
+    const chat = L.chat.slice(-12).map((c) => `<div><b>${esc(c.from)}</b> <span class="muted">${esc(c.company || '')}</span>: ${esc(c.text)}</div>`).join('');
+    openModal(`<h1>Lobby <span class="mono">${esc(L.code)}</span></h1>
+      <h2>${L.kind === 'local' ? 'Same-browser lobby: open the invite link in another tab.' : 'Online, peer to peer. Share the code or invite link with friends.'} ${L.started ? `· Quarter ${E.quarterLabel(L.turn)}` : ''}</h2>
+      <div class="btn-row"><input class="name-input" readonly value="${esc(MP.inviteLink())}" style="flex:1;font-size:12px"><button class="btn" data-action="copyInvite">Copy invite link</button></div>
+      <div class="rep-grid">
+        <div><h3>Labs in this race</h3><ul class="rep-list">${rows}</ul>
+          ${host && !L.started ? `<div class="btn-row"><button class="btn" data-action="mpAddBot">Add an AI lab</button></div>` : ''}
+          ${!L.started ? `<h3>Your lab</h3>
+            <div class="btn-row"><input id="mpName" class="name-input" style="width:140px" placeholder="Your name" value="${esc(me.name || '')}">
+            <input id="mpCompany" class="name-input" style="width:180px" placeholder="Company" value="${esc(me.company || '')}">
+            <select id="mpArch" class="sel">${FL.ARCHETYPES.map((a) => `<option value="${a.id}" ${a.id === me.archetype ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>
+            <button class="btn" data-action="mpProfile">Update</button></div>` : ''}
+          ${host && !L.started ? `<h3>Match settings</h3><div class="btn-row">
+            <select id="mpDiff" class="sel">${FL.DIFFICULTIES.map((d) => `<option value="${d.id}" ${d.id === L.settings.difficulty ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+            <select id="mpMode" class="sel"><option value="realtime" ${L.settings.mode === 'realtime' ? 'selected' : ''}>Real-time</option><option value="turns" ${L.settings.mode === 'turns' ? 'selected' : ''}>Turn-based</option></select>
+            <select id="mpSecs" class="sel">${[30, 45, 60, 90].map((n) => `<option value="${n}" ${n === L.settings.secondsPerQuarter ? 'selected' : ''}>${n}s per quarter</option>`).join('')}</select>
+            <label class="note"><input type="checkbox" id="mpAi" ${L.settings.aiRivals ? 'checked' : ''}> Include the classic AI rival labs</label>
+            <button class="btn" data-action="mpSettings">Apply</button></div>` : !L.started ? `<p class="note">Difficulty: ${esc(L.settings.difficulty || 'normal')} · ${L.settings.mode === 'realtime' ? `Real-time, ${L.settings.secondsPerQuarter}s per quarter` : 'Turn-based'} · Classic AI rivals: ${L.settings.aiRivals ? 'on' : 'off'}</p>` : ''}
+        </div>
+        <div><h3>Chat</h3><div class="chatlog">${chat || '<span class="muted">Say hello. Trash talk encouraged.</span>'}</div>
+          <div class="btn-row"><input id="mpChatIn" class="name-input" style="flex:1" placeholder="Message" maxlength="300"><button class="btn" data-action="mpChat">Send</button></div></div>
+      </div>
+      <div class="btn-row" style="justify-content:flex-end">
+        ${L.started ? '<button class="btn primary" data-action="closeModal">Back to the board</button>' : host ? '<button class="btn primary big" data-action="mpStart">Start the race</button>' : '<span class="note">Waiting for the host to start…</span>'}
+        <button class="btn danger" data-action="mpLeave">Leave</button></div>`);
+    $('modalCard').classList.add('wide');
+    const ci = $('mpChatIn');
+    if (ci) ci.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions.mpChat(); });
+  }
+  const lobbyOpen = () => !$('modal').classList.contains('hidden') && $('modalCard').querySelector('[data-action=mpLeave]');
+
+  MP.on('change', () => {
+    if (S && MP.active()) { MP.applySnapshots(S); UI.renderTopbar(); UI.renderLeft(); }
+    if (lobbyOpen()) showLobby();
+  });
+  MP.on('start', () => { startGame(MP.makeGame()); FX.toast(`The race is on: ${MP.lobby.players.length} labs.`, 'good'); });
+  MP.on('advance', () => {
+    if (!S || S.ended) { UI.renderTopbar(); return; }
+    if (S.pendingDilemma) {
+      // Real time waits for no one: hesitate and the default happens.
+      const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
+      FL.Bots.decide(S);
+      closeModal();
+      FX.toast(`<b>Out of time.</b> ${esc(d ? d.title : 'The decision')} went with the default.`, 'bad', 5000);
+    }
+    actions.endTurn('mp', null, (r) => { if (mpEndResolve) { const f = mpEndResolve; mpEndResolve = null; f(r); } });
+  });
+  MP.on('clock', (c) => { mpClock = c; UI.renderTopbar(); });
+  MP.on('chat', (c) => { if (!lobbyOpen()) FX.toast(`<span class="tk">${esc(c.company || '')}</span><b>${esc(c.from)}:</b> ${esc(c.text)}`, 'info', 5000); else showLobby(); });
+  MP.on('ended', (end) => { save(); UI.renderAll(); UI.showEnding(end); });
+  MP.on('error', (e) => FX.toast(esc(e), 'bad', 5000));
+  MP.on('hostLeft', () => FX.toast('The host left the lobby.', 'bad', 6000));
+
+  // ── Real-time clock ─────────────────────────────────────
+  const fmtSecs = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+  function clockLoop() {
+    const badge = $('clock');
+    if (!badge) return;
+    const now = Date.now();
+    let period = 0, left = null, paused = false, canPause = false;
+    if (S && !S.ended && MP.active() && MP.realtime()) {
+      period = MP.lobby.settings.secondsPerQuarter * 1000;
+      paused = !!mpClock.paused;
+      left = paused ? (mpClock.msLeft || 0) : mpClock.deadline ? mpClock.deadline - now : null;
+      canPause = MP.isHost();
+    } else if (S && !S.ended && !MP.active() && S.pace && S.pace !== 'turns') {
+      period = PACES.find((p) => p.id === S.pace).secs * 1000;
+      canPause = true;
+      const blocked = !$('modal').classList.contains('hidden') || document.hidden || busy;
+      paused = clock.paused || blocked;
+      if (paused) { if (clock.deadline) { clock.msLeft = clock.deadline - now; clock.deadline = null; } }
+      else if (!clock.deadline) { clock.deadline = now + (clock.msLeft != null ? clock.msLeft : period); clock.msLeft = null; }
+      left = clock.deadline ? clock.deadline - now : clock.msLeft != null ? clock.msLeft : period;
+      if (!paused && left <= 0) {
+        clock.deadline = null; clock.msLeft = null;
+        if (S.pendingDilemma) UI.showDilemma(); else actions.endTurn();
+      }
+    }
+    if (!period || left == null) { badge.classList.add('hidden'); return; }
+    badge.classList.remove('hidden');
+    badge.classList.toggle('urgent', !paused && left < 8000);
+    badge.innerHTML = `<span>${E.quarterLabel(S.turn)}</span><b>${paused ? 'Paused' : fmtSecs(left)}</b>
+      <div class="cbar2"><span style="width:${Math.max(0, Math.min(100, (1 - left / period) * 100))}%"></span></div>
+      ${canPause ? `<button class="btn" data-action="togglePause">${paused && (MP.active() || clock.paused) ? 'Resume' : 'Pause'}</button>` : ''}`;
+  }
+  setInterval(clockLoop, 250);
+
   // ── API used by the CLI bridge (js/bridge.js) ───────────
   UI.state = () => S;
   UI.lastReport = () => lastReport;
@@ -1130,6 +1289,7 @@
       else { selected = null; UI.renderAll(); }
     });
     document.addEventListener('keydown', (e) => {
+      if (e.key === ' ' && S && !(e.target && /INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))) { e.preventDefault(); actions.togglePause(); return; }
       if (e.key === 'm' && !(e.target && e.target.tagName === 'INPUT')) { A.setMuted(!A.isMuted()); if (S) UI.renderTopbar(); return; }
       if (e.key === 'Escape' && !$('modal').classList.contains('hidden') && S && !S.pendingDilemma && !S.ended) closeModal();
       else if (e.key === 'Escape' && S) { selected = null; UI.renderAll(); }
@@ -1137,6 +1297,7 @@
 
     if (FL.Bridge) FL.Bridge.connect();
     showSplash();
+    if (joinPrefill.code) setTimeout(() => { if ($('joinCode')) FX.toast(`Invite to lobby ${esc(joinPrefill.code)}: pick a name and origin, then press Join.`, 'info', 6000); }, 600);
     const saved = loadSave();
     if (saved && !saved.ended) {
       S = saved;
