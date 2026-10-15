@@ -53,8 +53,42 @@
       case 'chat':
         relayChat({ from: p ? p.name : '?', company: p ? p.company : '', text: String(msg.text).slice(0, 300) });
         break;
+      case 'interact':
+        routeInteraction(msg.to, msg.payload, from);
+        break;
     }
   }
+
+  /** Host: deliver an interaction to its target (another guest, the host itself, or an AI lab seat). */
+  function routeInteraction(to, payload, from) {
+    const target = MP.lobby.players.find((x) => x.id === to);
+    if (!target) return;
+    if (to === MP.myId) { emit('interact', { ...payload, fromId: from }); return; }
+    if (target.bot) {
+      const s = MP.bots[to];
+      if (!s || s.ended) return;
+      const sender = s.rivals.find((r) => r.pid === from);
+      if (payload.kind === 'impact') FL.Rivals.receive(s, payload.impact, { from: payload.from });
+      else if (payload.kind === 'proposal') {
+        // AI labs answer immediately, by the same odds they would give an AI rival.
+        const yes = E.rand(s) < 0.45;
+        sendTo(from, { kind: 'reply', uid: payload.uid, accepted: yes, from: target.company }, to);
+      }
+      return;
+    }
+    MP.conn.send({ type: 'interact', payload, from }, to);
+  }
+  function sendTo(to, payload, from) {
+    if (to === MP.myId) emit('interact', { ...payload, fromId: from });
+    else MP.conn.send({ type: 'interact', payload, from }, to);
+  }
+
+  /** Send an interaction to another player's lab (relayed by the host). */
+  MP.sendInteraction = function (toPlayerId, payload) {
+    if (!MP.active() || !toPlayerId) return;
+    if (MP.isHost()) routeInteraction(toPlayerId, payload, MP.myId);
+    else MP.conn.send({ type: 'interact', to: toPlayerId, payload });
+  };
 
   function relayChat(line) {
     MP.lobby.chat.push(line);
@@ -153,6 +187,7 @@
       case 'snaps': MP.lobby.players = msg.players; emit('snaps', msg.players); emit('change', MP.lobby); break;
       case 'clock': MP.clock = { week: msg.week, speed: msg.speed, at: Date.now() }; emit('clock', MP.clock); break;
       case 'world': emit('world', msg); break;
+      case 'interact': emit('interact', { ...msg.payload, fromId: msg.from }); break;
       case 'chat': MP.lobby.chat.push(msg.line); emit('chat', msg.line); break;
       case 'error': emit('error', msg.error); break;
     }
@@ -213,7 +248,7 @@
       let r = s.rivals.find((x) => x.id === rid);
       if (!r) { r = { id: rid, remote: true, rate: 0 }; s.rivals.push(r); }
       const changed = r.cap !== p.cap;
-      Object.assign(r, { name: p.company + (p.bot ? ' (AI)' : ''), color: p.color, cap: p.cap, player: p.name });
+      Object.assign(r, { name: p.company + (p.bot ? ' (AI)' : ''), color: p.color, cap: p.cap, player: p.name, pid: p.id });
       if (changed && FL.Fog) FL.Fog.observeRival(s, rid, p.cap, 1.5, 'model release');
     }
     if (!s.ended) {

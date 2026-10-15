@@ -167,6 +167,7 @@
     E.recordHistory(state);
     if (FL.Fog) FL.Fog.init(state);
     if (FL.Growth) FL.Growth.init(state);
+    if (FL.Rivals) FL.Rivals.init(state);
     if (FL.Systems) FL.Systems.onNewGame(state);
     state.qr = newQuarterReport(state);
     return state;
@@ -521,6 +522,7 @@
     const opt = d.options[optionIndex];
     applyOutcome(state, opt);
     let text = opt.desc;
+    if (d.rival && FL.Rivals) text = FL.Rivals.resolve(state, item, optionIndex) || text;
     if (opt.chance) {
       let p = opt.chance.p;
       if (opt.chance.useStakeholder) p = clamp(0.5 + 0.5 * state.happiness[opt.chance.useStakeholder], 0.05, 0.95);
@@ -609,6 +611,12 @@
   }
 
   // ── Decision inbox ──────────────────────────────────────
+  /** Title/text/options for an inbox item (rival proposals are rendered dynamically). */
+  E.dilemmaView = function (state, item) {
+    const d = FL.DILEMMAS.find((x) => x.id === item.id);
+    if (d && d.rival && FL.Rivals) return FL.Rivals.render(state, item);
+    return d;
+  };
   E.syncPending = (state) => { state.pendingDilemma = state.inbox.length ? state.inbox[0].id : null; };
   E.addDecision = function (state, dilemmaId, weeks) {
     const d = FL.DILEMMAS.find((x) => x.id === dilemmaId);
@@ -684,6 +692,7 @@
     if (FL.Systems) FL.Systems.tick(state, qr, dt);
     if (FL.Growth) FL.Growth.tick(state, qr, dt);
     if (FL.Events) FL.Events.tick(state, qr, dt);
+    if (FL.Rivals) FL.Rivals.tick(state, qr, dt);
     E.rollDilemma(state, dt);
 
     state.week++;
@@ -782,6 +791,8 @@
       case 'claimed': return `Claimed ${ev.name}: ${ev.text}`;
       case 'buff': return `Effect started: ${ev.name} (${ev.weeks} weeks)`;
       case 'users': return `Reached ${ev.text}`;
+      case 'interaction': return ev.text;
+      case 'attacked': return `Rival move: ${ev.text}`;
       case 'newspaper': { const n = (FL.Engine._lastPaper || {}); return `Quarterly newspaper printed${n.head ? ': "' + n.head + '"' : ''}`; }
       case 'newGen': return `New chip generation shipping: ${ev.name}`;
       case 'hired': return `Hired ${ev.name}${ev.headline ? ', ' + ev.headline : ''}`;
