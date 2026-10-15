@@ -238,7 +238,7 @@
     else if (badStart) { head = pick(state, tabloid ? [`${badStart.name.toUpperCase()}! ${co.toUpperCase()} IN CHAOS`, `MELTDOWN AT ${co.toUpperCase()}`] : [`${badStart.name} Rocks ${co}`, `${co} Grapples With ${badStart.name}`]); sub = badStart.desc; }
     else if (model) { head = pick(state, [`${co} Unveils ${model.name}`, `${model.name} Is Here`, `Meet ${model.name}, ${co}'s New Flagship`]); sub = model.blurb; }
     else if (report.funding) { head = `${co} Raises ${money(report.funding.raised)}`; sub = `The ${report.funding.name} values the lab at ${money(report.funding.valuation)}.`; }
-    else if (tier) { head = `${co} Joins the ${tier.name}`; sub = tier.blurb; }
+    else if (tier) { head = /club/i.test(tier.name) ? `${co} Joins the ${tier.name}` : `${co} Becomes a ${tier.name}`; sub = tier.blurb; }
     else if (goodStart) { head = `${goodStart.name}: ${co} Rides High`; sub = goodStart.desc; }
     else if (report.news && report.news.length) { head = report.news[0].replace(/\.$/, ''); sub = `${co} is under pressure to respond.`; }
     else {
@@ -268,6 +268,8 @@
     state.lastEventTurn = 1;
     state.era = S.eraOf(state).id;
     state.tension = S.tension(state);
+    // Tiers already exceeded at founding are not milestones.
+    for (const t of FL.VALUATION_TIERS) if (state.valuation >= t.at) state.milestones['tier' + t.at] = 0;
     S.fireTrigger(state, 'start', null);
     S.fireTrigger(state, 'start:' + state.archetype, null);
     for (const slot of FL.OBJECTIVE_SLOTS) S.dealObjective(state, slot);

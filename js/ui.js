@@ -266,9 +266,7 @@
       <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
       <button class="btn" data-action="hiring">Recruiting${S.people && S.people.feed.length ? ` <b>${S.people.feed.length}</b>` : ''}</button>
       <button class="btn" data-action="compute">Compute${S.hw && S.hw.offers.length ? ` <b class="pos">${S.hw.offers.length} deal${S.hw.offers.length > 1 ? 's' : ''}</b>` : ''}</button>
-      <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b>/${FL.ARCHIVE.length}</button>
-      <button class="btn" data-action="mute" title="Sound (M)">${A.isMuted() ? 'Muted' : 'Sound'}</button>
-      <button class="btn" data-action="briefing">Briefing</button>
+      <button class="btn" data-action="archive" title="The Archive">Archive <b>${meta.artifacts.length}</b></button>
       <button class="btn" data-action="gameMenu">Menu</button>
       <button class="btn primary big" data-action="endTurn" ${S.ended ? 'disabled' : ''}>End quarter</button>`;
   };
@@ -709,7 +707,7 @@
 
   const actions = {
     inspect: (id) => { UI.inspect(id); UI.renderLeft(); applyHighlight(); if (E.nodeType(id) === 'policy') updatePolicyPreview(E.node(id).def); },
-    briefing: () => { selected = null; UI.renderAll(); },
+    briefing: () => { selected = null; closeModal(); UI.renderAll(); },
     help: () => openModal(helpHTML()),
     start: () => UI.showStart(),
     menu: () => UI.showStart(),
@@ -738,7 +736,7 @@
       A.play('cancel');
       save(); UI.renderAll();
     },
-    endTurn: () => {
+    endTurn: (arg, el, done) => {
       if (!S || S.ended || busy) return;
       busy = true;
       preview = {};
@@ -760,6 +758,7 @@
         if (r.era) celebrations.push({ kicker: 'A new era begins', title: r.era.name, text: r.era.blurb });
         busy = false;
         UI.showReport(r);
+        if (done) done(r);
       }, 420);
     },
     afterReport: () => {
@@ -772,7 +771,7 @@
     archive: (tab) => showArchive(tab || 'all'),
     hiring: () => showHiring(),
     compute: () => showCompute(),
-    offer: (id) => { const r = HR.makeOffer(S, id); afterAction(r, r.ok ? (r.accepted ? `<b>${esc(r.person.name)}</b> accepted your offer.` : esc(r.text)) : null); showHiring(r.ok ? null : r.reason); if (r.ok) A.play(r.accepted ? 'chime' : 'cancel'); },
+    offer: (id) => { const r = HR.makeOffer(S, id); afterAction(r, r.ok ? (r.accepted ? `<b>${esc(r.person.name)}</b> accepted your offer.` : esc(r.text)) : null); showHiring(r.ok ? null : r.reason); if (r.ok) A.play(r.accepted ? 'chime' : 'cancel'); return r; },
     passCand: (id) => { S.people.feed = S.people.feed.filter((c) => c.id !== +id); save(); showHiring(); },
     appoint: (id) => { const sel = document.getElementById('focus-' + id); const r = HR.appointManager(S, id, sel ? sel.value : null); afterAction(r); showHiring(r.ok ? null : r.reason); },
     unappoint: (id) => { HR.removeManager(S, id); afterAction({ ok: true }); showHiring(); },
@@ -782,11 +781,13 @@
     deal: (id) => { const r = HW.acceptOffer(S, id); afterAction(r, r.ok ? 'Deal signed.' : null); showCompute(r.ok ? null : r.reason); if (r.ok) A.play('cash'); },
     sell: (id) => { const r = HW.sellCluster(S, id); afterAction(r, r.ok ? `Sold for ${money(r.price)}.` : null); showCompute(r.ok ? null : r.reason); },
     gameMenu: () => openModal(`<h1>Menu</h1><div class="btn-row">
+      <button class="btn big" data-action="briefing">Quarterly briefing</button>
+      <button class="btn big" data-action="mute">${A.isMuted() ? 'Turn sound on' : 'Mute sound'} (M)</button>
       <button class="btn big" data-action="help">How to play</button>
       <button class="btn big" data-action="archive">The Archive</button>
       <button class="btn big danger" data-action="menu">New game</button>
       <button class="btn big" data-action="closeModal">Back to the board</button></div>`),
-    mute: () => { A.setMuted(!A.isMuted()); UI.renderTopbar(); },
+    mute: () => { A.setMuted(!A.isMuted()); closeModal(); UI.renderTopbar(); FX.toast(A.isMuted() ? 'Sound off' : 'Sound on', 'info', 1500); },
     choose: (i) => {
       const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
       const res = E.resolveDilemma(S, +i);
@@ -800,6 +801,7 @@
         ${pit ? `<div class="history"><h4>History rhymes · ${esc(pit.name)}</h4><p>${esc(pit.history)}</p><p class="lesson">${esc(pit.lesson)}</p></div>` : ''}
         <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="${res.ending ? 'showEnd' : S.pendingDilemma ? 'nextDilemma' : 'closeModal'}">Continue</button></div>`);
       recordUnlocks(res, 300);
+      return res;
     },
     showEnd: () => UI.showEnding(S.ended),
     nextDilemma: () => UI.showDilemma(),
@@ -1000,6 +1002,42 @@
     track.style.animationDuration = Math.max(30, track.textContent.length / 6) + 's';
   }
 
+  // ── API used by the CLI bridge (js/bridge.js) ───────────
+  UI.state = () => S;
+  UI.lastReport = () => lastReport;
+  UI.meta = () => meta;
+  UI.act = (name, arg) => actions[name](arg);
+  UI.refresh = (res) => afterAction(res);
+  UI.startNew = (arch, name, diff) => startGame(E.newGame(arch, name, undefined, diff));
+  UI.policyChange = function (id, lvl) {
+    const st = S.policies[id];
+    const r = E.changePolicy(S, id, lvl);
+    if (r.ok) {
+      S.log.push({ turn: S.turn, text: lvl == null ? `Cancelled ${nameOf(id)}` : `${st ? 'Adjusted' : 'Enacted'} ${nameOf(id)} (${pct(lvl)})` });
+      A.play(lvl == null ? 'cancel' : st ? 'click' : 'enact');
+      selected = id;
+      afterAction(r);
+    }
+    return r;
+  };
+  UI.endQuarter = () => new Promise((resolve) => actions.endTurn(null, null, resolve));
+  UI.choose = (i) => actions.choose(i);
+  UI.dismiss = function () {
+    for (let k = 0; k < 6 && !$('modal').classList.contains('hidden'); k++) {
+      if (S && S.pendingDilemma && $('modalCard').querySelector('[data-action=choose]')) break;
+      const b = $('modalCard').querySelector('[data-action=afterReport], [data-action=nextDilemma], [data-action=showEnd], [data-action=closeModal]');
+      if (!b) break;
+      actions[b.dataset.action](b.dataset.arg);
+    }
+  };
+  UI.advisor = function (text) {
+    const box = $('advisor');
+    if (!box) return;
+    box.classList.remove('hidden');
+    box.querySelector('.adv-body').textContent = text;
+    A.play('decision');
+  };
+
   UI.init = function () {
     document.addEventListener('pointerdown', () => A.unlock(), { once: false });
     document.addEventListener('click', (e) => {
@@ -1033,6 +1071,7 @@
       else if (e.key === 'Escape' && S) { selected = null; UI.renderAll(); }
     });
 
+    if (FL.Bridge) FL.Bridge.connect();
     const saved = loadSave();
     if (saved && !saved.ended) {
       S = saved;

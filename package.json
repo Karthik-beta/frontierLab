@@ -6,6 +6,10 @@
   "scripts": {
     "test": "node --test test/engine.test.js test/systems.test.js",
     "sim": "node tools/simulate.js",
-    "start": "open index.html"
+    "start": "node tools/serve.js",
+    "play": "open index.html"
+  },
+  "bin": {
+    "frontier": "cli/frontier.js"
   }
 }
