@@ -16,6 +16,7 @@
   let pickedArch = FL.ARCHETYPES[0].id;
   let pickedDiff = 'normal';
   const MP = FL.Multiplayer;
+  const SHARE_URL = 'https://g8r-b8.github.io/frontierLab/';
   const joinPrefill = (() => { try { const q = new URLSearchParams(location.search); return { code: q.get('join') || '', kind: q.get('net') || 'internet' }; } catch (e) { return {}; } })();
   let mpEndResolve = null;
   let pickedPace = 'turns';
@@ -710,7 +711,7 @@
         <li><span>Final valuation</span><span class="m">${money(S.valuation)}</span></li>
         <li><span>Total raised</span><span class="m">${money(S.rounds.reduce((a, b) => a + b.raised, 0))} over ${S.rounds.length} rounds</span></li>
       </ul>
-      <div class="btn-row"><button class="btn primary big" data-action="menu">New game</button><button class="btn big" data-action="closeModal">Look at the board</button></div>`);
+      <div class="btn-row"><button class="btn primary big" data-action="menu">New game</button><button class="btn big" data-action="shareRun">Copy run summary</button><button class="btn big" data-action="closeModal">Look at the board</button></div>`);
   };
 
   // ── flow ─────────────────────────────────────────────────
@@ -834,6 +835,13 @@
       } catch (e) { FX.toast(esc(e.message || e), 'bad', 5000); }
     },
     mpLobby: () => showLobby(),
+    shareRun: () => {
+      const arch = FL.ARCHETYPES.find((a) => a.id === S.archetype);
+      const end = S.ended || { title: 'Still running' };
+      const text = `${end.title}: ${S.company} (${arch ? arch.name : ''}, ${S.difficulty}) reached capability ${Math.floor(S.cap)} by ${E.quarterLabel(Math.min(S.turn, E.MAX_TURNS))} with ${pct(S.values.safety)} safety maturity. Score ${E.score(S)}. Repeated ${Object.keys(S.pitfallsFired || {}).length} historical mistakes; collected ${meta.artifacts.length}/${FL.ARCHIVE.length} artifacts.\nPlay Frontier: ${SHARE_URL}`;
+      try { navigator.clipboard.writeText(text); FX.toast('Run summary copied. Paste it anywhere.', 'good', 2500); } catch (e) { FX.toast(esc(text), 'info', 9000); }
+    },
+    inviteFriend: () => { try { navigator.clipboard.writeText(SHARE_URL); FX.toast('Link copied.', 'good', 2000); } catch (e) { /* ignore */ } },
     mpAddBot: () => MP.addBot(),
     mpRemove: (id) => MP.removePlayer(id),
     mpStart: () => MP.start(),
@@ -861,6 +869,7 @@
       <button class="btn big" data-action="mute">${A.isMuted() ? 'Turn sound on' : 'Mute sound'} (M)</button>
       <button class="btn big" data-action="help">How to play</button>
       <button class="btn big" data-action="archive">The Archive</button>
+      <button class="btn big" data-action="inviteFriend">Copy link to share the game</button>
       <button class="btn big danger" data-action="menu">New game</button>
       <button class="btn big" data-action="closeModal">Back to the board</button></div>`),
     mute: () => { A.setMuted(!A.isMuted()); closeModal(); UI.renderTopbar(); FX.toast(A.isMuted() ? 'Sound off' : 'Sound on', 'info', 1500); },

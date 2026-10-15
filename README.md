@@ -1,11 +1,18 @@
 # Frontier
 
+**Found an AI lab. Race to AGI. Try not to repeat history.**
+**[Play in your browser →](https://g8r-b8.github.io/frontierLab/)**
+
+![The Frontier board](assets/screenshot-board.png)
+
 A Democracy-style management sim about founding a frontier AI lab. It has the same structure as
 Positech's *Democracy*: policies on sliders, a web of lagged cause and effect, stakeholder
 "voter groups", situations and dilemmas. The difference is that you're racing to AGI instead of
 running a country, and history keeps repeating on you.
 
 ## Play
+
+Play online at https://g8r-b8.github.io/frontierLab/, or locally:
 
 ```sh
 open index.html          # just play (no build step, autosaves locally)
@@ -22,19 +29,24 @@ into the game's advisor panel with `./frontier say`.
 | Democracy            | Frontier                                                             |
 |----------------------|----------------------------------------------------------------------|
 | Political capital    | Bandwidth (leadership attention)                                     |
-| Policies & sliders   | 40 policies in 6 categories                                          |
-| Simulation values    | 15 stats + 4 indicators, all wired together with lags                |
+| Policies & sliders   | 44 policies in 7 categories (incl. Marketing)                        |
+| Simulation values    | 16 stats + 4 indicators, all wired together with lags                |
 | Voter groups         | 10 stakeholders (board, investors, researchers, regulators, ...)     |
 | Elections            | Funding rounds every 6 quarters, plus dilution                       |
 | Assassination        | Board coup                                                           |
 | Situations           | 13 situations (talent exodus, injunctions, viral moments, ...)       |
-| Dilemmas             | 31 events, including real AI bloopers                                |
+| Dilemmas             | 32 events incl. real AI bloopers, plus a launch-day call per model   |
 | Cabinet              | Hiring: named candidates, hiring managers, practices, culture values |
 | —                    | GPU fleet: chip generations, failures, depreciation, power, deals    |
 | —                    | 18 historical pitfalls across short, medium and long horizons         |
-| —                    | The Archive: 134 sourced artifacts; 64 achievements; objectives      |
+| —                    | 171 verified real quotes/artifacts on the loading screen, in the newspaper and in the Archive; 78 achievements |
+| —                    | Marketing: brand vs hype, campaigns (Super Bowl in Q1 only), launch strategy |
+| —                    | Multiplayer: real-time, peer to peer, friends + AI labs, chat        |
 
-There are three difficulties: **Easy**, **Normal** and **Realistic**.
+There are three difficulties (**Easy**, **Normal**, **Realistic**) and two paces (**Turn-based** or
+**Real-time** with pause).
+
+![Quarterly report with a real quote](assets/screenshot-report.png)
 
 Real people and events appear only as sourced archive cards and history notes on pitfalls.
 The verified research lives in `tools/research/`. The labs, chips and providers you meet in
@@ -50,4 +62,7 @@ play are fictional.
 - `js/ui.js`, `js/audio.js`, `js/fx.js`: board, panels, synthesized sound and feedback.
 - `tools/serve.js`, `js/bridge.js`, `cli/frontier.js`: the terminal bridge.
 - `tools/simulate.js`: headless balance bots (`npm run sim`, `DIFFICULTY=realistic npm run sim`).
+- `js/net.js`, `js/multiplayer.js`: peer-to-peer lobbies and the shared real-time race (`docs/MULTIPLAYER.md`).
 - `test/`: `npm test`.
+
+Roadmap: [TODO.md](TODO.md). Docs: [docs/](docs/). Press kit: [docs/PRESS_KIT.md](docs/PRESS_KIT.md).

@@ -7,9 +7,13 @@
     "test": "node --test test/engine.test.js test/systems.test.js test/subsystems.test.js",
     "sim": "node tools/simulate.js",
     "start": "node tools/serve.js",
-    "play": "open index.html"
+    "play": "open index.html",
+    "screenshots": "node tools/screenshots.js"
   },
   "bin": {
     "frontier": "cli/frontier.js"
+  },
+  "devDependencies": {
+    "playwright-core": "1.49.1"
   }
 }
