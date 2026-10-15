@@ -4,53 +4,53 @@
   'use strict';
 
   FL.STATS = [
-    { id: 'compute', name: 'Compute Capacity', icon: '🖥️', base: 0.10, good: true,
+    { id: 'compute', name: 'Compute Capacity', base: 0.10, good: true,
       desc: 'GPUs you can actually train and serve on. The single biggest driver of research velocity, and the single biggest line on your burn.' },
-    { id: 'talent', name: 'Talent Density', icon: '🧑‍🔬', base: 0.25, good: true,
+    { id: 'talent', name: 'Talent Density', base: 0.25, good: true,
       desc: 'How many of the world\'s best researchers work for you. Researchers follow compute, pay, mission and winning.' },
-    { id: 'morale', name: 'Morale', icon: '💪', base: 0.50, good: true,
+    { id: 'morale', name: 'Morale', base: 0.50, good: true,
       desc: 'How the staff feel. Low morale means attrition, leaks and open letters.' },
-    { id: 'velocity', name: 'Research Velocity', icon: '⚡', base: 0.00, good: true,
+    { id: 'velocity', name: 'Research Velocity', base: 0.00, good: true,
       desc: 'How fast frontier capability advances each quarter. Built from compute, talent, data and research programs.' },
-    { id: 'safety', name: 'Safety Maturity', icon: '🛡️', base: 0.08, good: true,
+    { id: 'safety', name: 'Safety Maturity', base: 0.08, good: true,
       desc: 'Alignment, evals and control. Decides whether reaching AGI is a triumph or a catastrophe.' },
-    { id: 'quality', name: 'Product Quality', icon: '⭐', base: 0.05, good: true,
+    { id: 'quality', name: 'Product Quality', base: 0.05, good: true,
       desc: 'How good your shipped models and products feel to users. Mostly follows capability.' },
-    { id: 'adoption', name: 'Adoption', icon: '👥', base: 0.00, good: true,
+    { id: 'adoption', name: 'Adoption', base: 0.00, good: true,
       desc: 'Share of the market using your models — consumers, developers and enterprises.' },
-    { id: 'monetization', name: 'Monetization', icon: '💵', base: 0.05, good: true,
+    { id: 'monetization', name: 'Monetization', base: 0.05, good: true,
       desc: 'How much revenue each unit of adoption turns into. Driven by pricing and business lines.' },
-    { id: 'hype', name: 'Hype', icon: '🔥', base: 0.10, good: true,
+    { id: 'hype', name: 'Hype', base: 0.10, good: true,
       desc: 'The narrative. Investors pay for it, regulators notice it, and it can pop.' },
-    { id: 'trust', name: 'Public Trust', icon: '🤝', base: 0.45, good: true,
+    { id: 'trust', name: 'Public Trust', base: 0.45, good: true,
       desc: 'Whether the public believes you are the responsible ones.' },
-    { id: 'regHeat', name: 'Regulatory Heat', icon: '🏛️', base: 0.05, good: false,
+    { id: 'regHeat', name: 'Regulatory Heat', base: 0.05, good: false,
       desc: 'Government attention. Too much leads to investigations — and eventually injunctions.' },
-    { id: 'data', name: 'Data Advantage', icon: '🗄️', base: 0.15, good: true,
+    { id: 'data', name: 'Data Advantage', base: 0.15, good: true,
       desc: 'Proprietary data, usage flywheel and synthetic pipelines.' },
-    { id: 'security', name: 'Security Posture', icon: '🔐', base: 0.25, good: true,
+    { id: 'security', name: 'Security Posture', base: 0.25, good: true,
       desc: 'How hard it is to steal your weights. Matters more as capability rises.' },
-    { id: 'legal', name: 'Legal Exposure', icon: '⚖️', base: 0.05, good: false,
+    { id: 'legal', name: 'Legal Exposure', base: 0.05, good: false,
       desc: 'Copyright, privacy and liability risk built up from how you got your data.' },
-    { id: 'openness', name: 'Research Openness', icon: '📖', base: 0.15, good: true,
+    { id: 'openness', name: 'Research Openness', base: 0.15, good: true,
       desc: 'How much you share. Researchers love it; security teams and some investors do not.' },
   ];
 
   /* Indicators are computed directly by the engine, not by effect edges. */
   FL.INDICATORS = [
-    { id: 'capability', name: 'Frontier Capability', icon: '🚀', good: true,
+    { id: 'capability', name: 'Frontier Capability', good: true,
       desc: 'Your best model\'s capability. 100 = AGI. Everything gets more intense as it rises.' },
-    { id: 'lead', name: 'Race Position', icon: '🏁', good: true,
+    { id: 'lead', name: 'Race Position', good: true,
       desc: 'Your capability relative to the best rival lab. 50% = neck and neck.' },
-    { id: 'runway', name: 'Runway', icon: '⏳', good: true,
+    { id: 'runway', name: 'Runway', good: true,
       desc: 'Quarters of cash left at current burn (100% = 8+ quarters).' },
-    { id: 'revGrowth', name: 'Revenue Momentum', icon: '📈', good: true,
+    { id: 'revGrowth', name: 'Revenue Momentum', good: true,
       desc: 'Year-on-year revenue growth. Investors care about this almost as much as hype.' },
   ];
 
   /* Stat → stat edges. k = weight, curve: lin | sqrt | sq | ctr ((x-.5)*2) | inv (1-x), lag in quarters. */
   FL.STAT_LINKS = [
-    { from: 'compute', to: 'velocity', k: 0.40, curve: 'sqrt', lag: 2 },
+    { from: 'compute', to: 'velocity', k: 0.48, lag: 2 },
     { from: 'talent', to: 'velocity', k: 0.30, lag: 2 },
     { from: 'data', to: 'velocity', k: 0.12, lag: 2 },
     { from: 'morale', to: 'velocity', k: 0.08, curve: 'ctr', lag: 1 },
@@ -64,6 +64,7 @@
     { from: 'runway', to: 'morale', k: 0.10, curve: 'ctr', lag: 2 },
 
     { from: 'talent', to: 'safety', k: 0.08, lag: 3 },
+    { from: 'capability', to: 'safety', k: -0.30, lag: 2 }, // alignment gets harder as models get stronger
 
     { from: 'capability', to: 'quality', k: 0.60, lag: 1 },
     { from: 'talent', to: 'quality', k: 0.10, lag: 2 },
