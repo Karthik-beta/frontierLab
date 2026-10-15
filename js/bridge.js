@@ -257,7 +257,8 @@
 
   /** Connect to the local bridge via Server-Sent Events. */
   B.connect = function () {
-    if (!/^https?:/.test(location.protocol) || !window.EventSource) return;
+    // Only when served by tools/serve.js on this machine (not file:// or a public host).
+    if (!/^https?:/.test(location.protocol) || !/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !window.EventSource) return;
     const es = new EventSource('/bridge/events');
     const pill = document.getElementById('bridgePill');
     es.addEventListener('hello', () => { if (pill) { pill.classList.remove('hidden'); pill.textContent = 'CLI connected'; } });
