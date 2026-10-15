@@ -644,6 +644,22 @@
     return report;
   };
 
+  // ── Real time (skeleton) ─────────────────────────────────
+  E.TICKS_PER_Q = 13; // one tick = one game week
+
+  /** Advance the world by dt quarters (normally one week). Cash, capability, rivals, hardware,
+   * people, situations, pitfalls and decisions all move continuously; quarter-end bookkeeping
+   * (funding, newspaper, board) happens when a quarter boundary is crossed.
+   * TODO: implement. Acceptance: 13 ticks ≈ one old endTurn; deterministic per seed. */
+  E.tick = function (state, dt) { throw new Error('NotImplemented: tick'); };
+
+  /** Quarter-end bookkeeping; returns the quarter's newspaper report. TODO: implement. */
+  E.quarterBoundary = function (state) { throw new Error('NotImplemented: quarterBoundary'); };
+
+  /** Decision inbox: add, resolve by uid, expire past deadlines (default option). TODO: implement. */
+  E.addDecision = function (state, dilemmaId, weeks) { throw new Error('NotImplemented: addDecision'); };
+  E.expireDecisions = function (state, qr) { throw new Error('NotImplemented: expireDecisions'); };
+
   E.serialize = (state) => JSON.stringify(state);
   E.deserialize = (json) => JSON.parse(json);
 
