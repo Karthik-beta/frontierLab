@@ -564,6 +564,11 @@
         <p><b>Stakeholders</b> (inner ring and left panel) are your voter groups. Unhappy investors kill funding rounds. An unhappy board fires you.</p>
         <p><b>Situations</b> appear in the middle when pressure builds: lawsuits, scandals, talent exodus, injunctions — or viral moments and frontier leadership.</p>
         <p><b>Winning.</b> Reach capability 100 before your rivals. If safety maturity is high enough when you get there, you built aligned AGI. If not... Alignment gets harder as capability rises.</p>
+        <p><b>Compute.</b> Your GPUs are real assets: datacenter spend buys pods that come online later, age, fail and depreciate, and need power. A new chip generation ships about every six quarters. Providers offer deals with very different strings attached.</p>
+        <p><b>Recruiting.</b> Hire key people yourself at first, then appoint hiring managers. Hiring practices decide who gets through; company values decide who you become. Toxic cultures catch up with you.</p>
+        <p><b>Pitfalls.</b> Short-, medium- and long-term traps from real AI and startup history build up quietly. Watch the risk radar for warning signs.</p>
+        <p><b>The Archive.</b> Real quotes, memos and headlines unlock as your company repeats history. Your collection and achievements carry across runs.</p>
+        <p><b>Terminal and Claude.</b> Run <code>npm start</code>, open localhost:4747, and drive the game with <code>./frontier help</code> — or ask Claude Code to be your chief of staff.</p>
       </div>
       <div class="btn-row"><button class="btn primary" data-action="${S ? 'closeModal' : 'start'}">Got it</button></div>`;
   }
