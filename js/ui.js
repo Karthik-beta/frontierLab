@@ -4,6 +4,8 @@
   const E = FL.Engine;
   const UI = {};
   const SAVE_KEY = 'frontierlab.save.v1';
+  const META_KEY = 'frontierlab.meta.v1';
+  const Sys = FL.Systems, A = FL.Audio, FX = FL.FX;
 
   let S = null;           // game state
   let pos = {};           // node id -> {x, y, r}
@@ -13,6 +15,9 @@
   let preview = {};       // policy id -> slider level not yet applied
   let pickedArch = FL.ARCHETYPES[0].id;
   let lastReport = null;
+  let celebrations = [];
+  let busy = false;
+  let endingShown = false;
 
   const R_POLICY = 418, R_STAT = 290, R_SH = 200, R_SIT = 128, R_CORE = 72;
 
@@ -51,6 +56,41 @@
   const statColor = (id, v) => goodColor(isGood(id) ? v : 1 - v);
   const happyColor = (h) => goodColor((h + 1) / 2);
   const runwayQ = () => (S.finance.net >= 0 ? Infinity : S.cash / -S.finance.net);
+
+  /** Cross-run collection: archive cards and achievements persist between games. */
+  function loadMeta() {
+    try { return Object.assign({ artifacts: [], achievements: [], runs: 0 }, JSON.parse(localStorage.getItem(META_KEY) || '{}')); } catch (e) { return { artifacts: [], achievements: [], runs: 0 }; }
+  }
+  let meta = loadMeta();
+  function saveMeta() { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignore */ } }
+  const artifactOf = (id) => FL.ARCHIVE.find((a) => a.id === id);
+  const achievementOf = (id) => FL.ACHIEVEMENTS.find((a) => a.id === id);
+
+  /** Toast + sound for newly unlocked artifacts/achievements, and record them in the collection. */
+  function recordUnlocks(res, delay) {
+    if (!res) return;
+    let d = delay || 0;
+    for (const id of res.artifacts || []) {
+      const a = artifactOf(id);
+      if (!a) continue;
+      const isNew = !meta.artifacts.includes(id);
+      if (isNew) meta.artifacts.push(id);
+      setTimeout(() => {
+        A.play('artifact', { rarity: a.rarity });
+        FX.toast(`<span class="tk">${isNew ? 'New ' : ''}${a.rarity} artifact · ${a.year}</span><b>${esc(a.title)}</b>${a.quote ? `<br><i>"${esc(a.quote)}"</i>` : ''}`, a.rarity === 'common' ? 'info' : a.rarity, a.rarity === 'legendary' ? 7000 : 5000);
+      }, d);
+      d += 700;
+    }
+    for (const id of res.achievements || []) {
+      const a = achievementOf(id);
+      if (!a || meta.achievements.includes(id)) continue;
+      meta.achievements.push(id);
+      setTimeout(() => { A.play('milestone'); FX.toast(`<span class="tk">Achievement unlocked</span><b>${esc(a.name)}</b><br>${esc(a.desc)}`, 'legendary', 6000); }, d);
+      d += 900;
+    }
+    if (meta.artifacts.length >= 25 && !meta.achievements.includes('ach-archive25')) recordUnlocks({ achievements: ['ach-archive25'] }, d);
+    saveMeta();
+  }
 
   function save() {
     try { localStorage.setItem(SAVE_KEY, E.serialize(S)); } catch (e) { /* storage unavailable */ }
@@ -221,6 +261,9 @@
       <div class="kpi"><span class="k">Next round</span><span class="v">${toRound <= 0 ? 'This quarter' : 'in ' + toRound + ' q'}</span></div>
       <div class="kpi"><span class="k">Bandwidth</span><span class="v" style="color:#7dd3fc">${S.bandwidth} <small class="muted">+${E.bandwidthIncome(S)}/q</small></span></div>
       <div class="spacer"></div>
+      <span class="era-chip" title="${esc(Sys.eraOf(S).blurb)}">${esc(Sys.eraOf(S).name)}</span>
+      <button class="btn" data-action="archive">Archive ${meta.artifacts.length}/${FL.ARCHIVE.length}</button>
+      <button class="btn" data-action="mute" title="Sound (M)">${A.isMuted() ? 'Sound off' : 'Sound on'}</button>
       <button class="btn" data-action="briefing">Briefing</button>
       <button class="btn" data-action="help">How to play</button>
       <button class="btn" data-action="menu">New game</button>
@@ -242,7 +285,23 @@
     const race = racers.map((r) => `<div class="race-row"><div class="lbl"><span>${esc(r.name)}</span><b>${Math.floor(r.cap)}</b></div>
       <div class="rbar"><span style="width:${Math.min(100, r.cap)}%;background:${r.color}"></span></div></div>`).join('');
     const board = S.happiness.board;
+    const objs = S.objectives.map((o) => {
+      const p = Sys.objectiveProgress(S, o), left = o.deadline - S.turn;
+      const slot = FL.OBJECTIVE_SLOTS.find((x) => x.id === o.slot);
+      return `<div class="obj"><div class="who"><span>${esc(slot ? slot.name : o.slot)} · ${esc(nameOf(o.owner))}</span><span class="${left <= 1 ? 'neg' : ''}">${left <= 0 ? 'due now' : left + ' q left'}</span></div>
+        <div class="txt">${esc(o.text)}${o.kind === 'hold' ? ' <span class="muted">(checked at deadline)</span>' : ''}</div>
+        <div class="pbar"><span class="${p >= 0.75 ? 'near' : ''}" style="width:${Math.round(p * 100)}%"></span></div></div>`;
+    }).join('');
+    const risks = Sys.risks(S).map((r) => `<div class="risk" title="Builds over the ${r.horizon} term">
+        <div class="top"><b>${esc(r.name)}</b><span class="hz ${r.horizon}">${r.horizon}</span></div>
+        <div class="w">${esc(r.warn)}</div><div class="pbar" style="margin-top:5px"><span style="width:${Math.min(100, Math.round(r.meter * 100))}%"></span></div></div>`).join('');
+    const hidden = Sys.hiddenRiskCount(S);
+    const rumors = Sys.rumors(S).map((r) => `<div class="risk" style="background:#10161f;border-color:#243045"><div class="top"><b>${esc(r.name)}</b><span class="hz ${r.good ? 'long' : 'short'}">brewing</span></div></div>`).join('');
     $('left').innerHTML = `
+      <h3>Objectives</h3>${objs || '<p class="note">New asks arrive next quarter.</p>'}
+      <h3>Risk radar</h3>${risks}${rumors}
+      ${!risks && !rumors ? '<p class="note">No warning signs yet.</p>' : ''}
+      ${hidden ? `<p class="note">${hidden} other risk${hidden > 1 ? 's are' : ' is'} building where you can't see ${hidden > 1 ? 'them' : 'it'} yet.</p>` : ''}
       <h3>Stakeholders</h3>${rows}
       <div class="approval"><span>Overall approval</span><b style="color:${happyColor(appr)}">${spct(appr)}</b></div>
       <div class="approval" style="border-top:0;margin-top:0;padding-top:0"><span>Investor confidence</span><b style="color:${happyColor(conf)}">${spct(conf)}</b></div>
@@ -495,22 +554,31 @@
   UI.showReport = function (r) {
     lastReport = r;
     const f = r.finance;
-    const deltas = r.deltas.slice(0, 9).map((d) => {
+    const deltas = r.deltas.slice(0, 8).map((d) => {
       const better = (d.to - d.from) * (d.good === false ? -1 : 1) > 0;
       return `<li><span>${esc(d.name)}</span><span class="m ${better ? 'pos' : 'neg'}">${Math.round(d.from * 100)} → ${Math.round(d.to * 100)}</span></li>`;
     }).join('');
     const sitLine = (ids, verb) => ids.map((id) => {
-      const s = E.node(id).def;
-      const cls = (verb === 'started') === s.good ? 'good' : 'bad';
-      return `<div class="callout ${cls}"><b>${esc(s.name)}</b> ${verb}. ${verb === 'started' ? esc(s.desc) : ''}</div>`;
+      const st = E.node(id).def;
+      const cls = (verb === 'started') === st.good ? 'good' : 'bad';
+      return `<div class="callout ${cls}"><b>${esc(st.name)}</b> ${verb}. ${verb === 'started' ? esc(st.desc) : ''}</div>`;
     }).join('');
+    const h = r.headline || { paper: 'The Ledger', head: `${r.label} in review`, sub: '' };
+    const epi = r.epigraph && artifactOf(r.epigraph);
+    const ob = r.objectives || { done: [], failed: [], dealt: [] };
+    const obLines = ob.done.map((o) => `<div class="callout good"><b>Objective complete:</b> ${esc(o.text)} <span class="muted">(+4 bandwidth, ${esc(nameOf(o.owner))} pleased)</span></div>`).join('') +
+      ob.failed.map((o) => `<div class="callout bad"><b>Objective missed:</b> ${esc(o.text)} <span class="muted">(${esc(nameOf(o.owner))} disappointed)</span></div>`).join('');
+    const warnLines = (r.pitfallWarnings || []).map((w) => `<div class="callout warn"><b>Warning sign (${w.horizon}-term):</b> ${esc(w.text)}</div>`).join('');
+    const rumorLines = (r.rumors || []).map((x) => `<div class="callout"><b>Rumor:</b> ${x.good ? 'Momentum is building toward' : 'Insiders whisper about'} ${esc(x.name)}.</div>`).join('');
     openModal(`
-      <h2>${esc(S.company)}</h2>
-      <h1>${r.label} in review</h1>
+      <div class="reveal">
+      <div class="paper ${h.tabloid ? 'tabloid' : ''}"><div class="mast"><span>${esc(r.label)}</span><b>${esc(h.paper)}</b><span>Late edition</span></div>
+        <h1>${esc(h.head)}</h1><p>${esc(h.sub)}</p></div>
       ${r.funding ? `<div class="callout ${r.funding.ok ? 'good' : 'bad'}"><b>${r.funding.name}.</b> ${esc(r.funding.text)}</div>` : ''}
       ${r.bridge ? `<div class="callout warn">${esc(r.bridge)}</div>` : ''}
       ${sitLine(r.started, 'started')}${sitLine(r.ended, 'ended')}
       ${r.warnings.map((w) => `<div class="callout bad">${esc(w)}</div>`).join('')}
+      ${warnLines}${rumorLines}${obLines}
       <div class="rep-grid">
         <div>
           <h3>Finances</h3>
@@ -518,12 +586,12 @@
             <li><span>Revenue</span><span class="m pos">${money(f.revenue)}</span></li>
             <li><span>Costs</span><span class="m neg">${money(f.costs)}</span></li>
             <li><span>Net</span><span class="m ${f.net >= 0 ? 'pos' : 'neg'}">${money(f.net)}</span></li>
-            <li><span>Cash now</span><span class="m">${money(S.cash)}</span></li>
+            <li><span>Cash now</span><span class="m" id="repCash">${money(S.cash - (r.funding ? r.funding.raised : 0))}</span></li>
             <li><span>Valuation</span><span class="m">${money(S.valuation)}</span></li>
           </ul>
           <h3>The race</h3>
           <ul class="rep-list">
-            <li><span>Your capability</span><span class="m">${Math.floor(S.cap)} <span class="pos">(+${r.capGain.toFixed(1)})</span></span></li>
+            <li><span>Your capability</span><span class="m"><span id="repCap">${Math.floor(S.cap - r.capGain)}</span> <span class="pos">(+${r.capGain.toFixed(1)})</span></span></li>
             ${S.rivals.map((x) => `<li><span>${esc(x.name)}</span><span class="m">${Math.floor(x.cap)}</span></li>`).join('')}
           </ul>
           ${r.paused ? '<div class="callout warn">Your Responsible Scaling Policy kicked in: capability has outrun safety, so scaling slowed to a crawl.</div>' : ''}
@@ -531,14 +599,39 @@
         </div>
         <div><h3>Biggest changes</h3><ul class="rep-list">${deltas || '<li class="muted">A quiet quarter.</li>'}</ul></div>
       </div>
-      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="afterReport">Continue</button></div>`);
+      ${epi ? `<div class="quote"><q>${esc(epi.quote)}</q><span class="by">${esc(epi.speaker || '')}${epi.speaker ? ', ' : ''}${epi.year}${epi.paraphrase ? ' (paraphrase)' : ''}</span></div>` : ''}
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="afterReport">Continue</button></div>
+      </div>`);
+    $('modalCard').querySelectorAll('.reveal > *').forEach((el, i) => (el.style.animationDelay = i * 140 + 'ms'));
+    FX.countUp($('repCash'), S.cash - (r.funding ? r.funding.raised : 0), S.cash, 900, money);
+    FX.countUp($('repCap'), Math.floor(S.cap - r.capGain), Math.floor(S.cap), 700);
+    const badStart = r.started.some((id) => !E.node(id).def.good);
+    if (badStart || (r.funding && !r.funding.ok)) { A.play('crisis'); FX.shake($('modalCard'), 5, 320); }
+    else if (r.funding && r.funding.ok) setTimeout(() => A.play('cash'), 400);
+    else if ((r.pitfallWarnings || []).length || r.warnings.length) A.play('warn');
+    else if (ob.done.length) A.play('chime');
+    recordUnlocks(r, 900);
   };
+
+  /** Celebration cards for model generations, valuation tiers and new acts, shown one by one. */
+  function showCelebration(c) {
+    A.play('milestone');
+    FX.flash('#fbbf24');
+    openModal(`<div class="ms-card">
+      <div class="kicker">${c.kicker}</div><div class="big">${esc(c.title)}</div><p>${esc(c.text)}</p>
+      <div class="btn-row" style="justify-content:center"><button class="btn primary big" data-action="afterReport">Continue</button></div></div>`);
+    const r = $('modalCard').getBoundingClientRect();
+    FX.burst(r.left + r.width / 2, r.top + 90);
+  }
 
   UI.showDilemma = function () {
     const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
     if (!d) { S.pendingDilemma = null; return closeModal(); }
+    const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
+    A.play(pit ? 'crisis' : 'decision');
+    if (pit) { FX.shake($('modalCard'), 6, 380); FX.flash('#ef4444'); }
     openModal(`
-      <h2>Decision required · ${E.quarterLabel(S.turn)}</h2>
+      <h2>${pit ? `Pitfall · ${pit.horizon}-term · ${esc(pit.name)}` : 'Decision required'} · ${E.quarterLabel(S.turn)}</h2>
       <h1>${esc(d.title)}</h1>
       <p class="lede">${esc(d.text)}</p>
       <div class="cards">${d.options.map((o, i) => `
@@ -548,6 +641,7 @@
   };
 
   UI.showEnding = function (end) {
+    if (!endingShown) { endingShown = true; A.play(end.win ? 'win' : 'lose'); if (end.win) setTimeout(() => FX.burst(window.innerWidth / 2, window.innerHeight / 3, null, 90), 200); }
     const H = S.history, n = H._cap.length;
     const w = 640, h = 200;
     const line = (arr, col, width) => `<polyline fill="none" stroke="${col}" stroke-width="${width}" points="${arr.map((v, i) => `${(i / Math.max(1, n - 1)) * w},${h - (Math.min(v, 105) / 105) * h}`).join(' ')}"/>`;
@@ -573,6 +667,7 @@
 
   // ── flow ─────────────────────────────────────────────────
   UI.renderAll = function () {
+    renderTicker();
     UI.renderTopbar();
     UI.renderLeft();
     UI.renderBoard();
@@ -582,10 +677,13 @@
 
   function startGame(state) {
     S = state;
-    selected = null; hovered = null; preview = {}; lastReport = null;
+    selected = null; hovered = null; preview = {}; lastReport = null; endingShown = false; celebrations = [];
     closeModal();
     UI.renderAll();
     save();
+    if (S.unseen) { recordUnlocks(S.unseen, 400); S.unseen = null; save(); }
+    A.unlock();
+    A.setTension(S.tension || 0);
     if (S.ended) UI.showEnding(S.ended);
     else if (S.pendingDilemma) UI.showDilemma();
   }
@@ -608,6 +706,7 @@
       delete preview[id];
       S.finance = E.computeFinances(S);
       S.log.push({ turn: S.turn, text: `${st ? 'Adjusted' : 'Enacted'} ${nameOf(id)} (${pct(lvl)})` });
+      A.play(st ? 'click' : 'enact');
       save(); UI.renderAll();
     },
     cancel: (id) => {
@@ -616,21 +715,41 @@
       delete preview[id];
       S.finance = E.computeFinances(S);
       S.log.push({ turn: S.turn, text: `Cancelled ${nameOf(id)}` });
+      A.play('cancel');
       save(); UI.renderAll();
     },
     endTurn: () => {
-      if (!S || S.ended) return;
+      if (!S || S.ended || busy) return;
+      busy = true;
       preview = {};
-      const r = E.endTurn(S);
-      save();
-      UI.renderAll();
-      UI.showReport(r);
+      A.play('endTurn');
+      $('boardWrap').classList.add('thinking');
+      const beforeVals = { ...S.values };
+      setTimeout(() => {
+        const r = E.endTurn(S);
+        meta.runs += r && r.turn === 1 ? 1 : 0;
+        save();
+        $('boardWrap').classList.remove('thinking');
+        UI.renderAll();
+        floatDeltas(beforeVals);
+        A.setTension(S.tension || 0);
+        celebrations = [];
+        (r.milestones || []).forEach((m) => celebrations.push(m.kind === 'model'
+          ? { kicker: `New model · capability ${m.at}`, title: `${S.company} ${m.name}`, text: m.blurb }
+          : { kicker: 'Valuation milestone', title: m.name, text: m.blurb }));
+        if (r.era) celebrations.push({ kicker: 'A new era begins', title: r.era.name, text: r.era.blurb });
+        busy = false;
+        UI.showReport(r);
+      }, 420);
     },
     afterReport: () => {
+      if (celebrations.length) return showCelebration(celebrations.shift());
       if (S.ended) UI.showEnding(S.ended);
       else if (S.pendingDilemma) UI.showDilemma();
       else closeModal();
     },
+    archive: (tab) => showArchive(tab || 'all'),
+    mute: () => { A.setMuted(!A.isMuted()); UI.renderTopbar(); },
     choose: (i) => {
       const d = FL.DILEMMAS.find((x) => x.id === S.pendingDilemma);
       const res = E.resolveDilemma(S, +i);
@@ -638,12 +757,73 @@
       S.valuation = E.valuation(S);
       save();
       UI.renderAll();
+      A.play('click');
+      const pit = d && d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
       openModal(`<h2>${esc(d ? d.title : '')}</h2><h1>${esc(d ? d.options[+i].label : '')}</h1><p class="lede">${esc(res.text)}</p>
-        <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="closeModal">Continue</button></div>`);
+        ${pit ? `<div class="history"><h4>History rhymes · ${esc(pit.name)}</h4><p>${esc(pit.history)}</p><p class="lesson">${esc(pit.lesson)}</p></div>` : ''}
+        <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="${res.ending ? 'showEnd' : S.pendingDilemma ? 'nextDilemma' : 'closeModal'}">Continue</button></div>`);
+      recordUnlocks(res, 300);
     },
+    showEnd: () => UI.showEnding(S.ended),
+    nextDilemma: () => UI.showDilemma(),
+    archiveTab: (tab) => showArchive(tab),
   };
 
+  function floatDeltas(before) {
+    const svg = $('board');
+    let n = 0;
+    for (const id of STAT_ORDER) {
+      const q = pos[id], d = S.values[id] - before[id];
+      if (!q || Math.abs(d) < 0.02) continue;
+      const good = (d > 0) === isGood(id);
+      FX.floatDelta(svg, q.x, q.y - q.r - 8, (d > 0 ? '+' : '') + Math.round(d * 100), good ? '#4ade80' : '#f87171', n++ * 80);
+    }
+  }
+
+  function showArchive(tab) {
+    const tabs = [['all', 'All'], ['triumph', 'Triumph'], ['cautionary', 'Cautionary'], ['doom', 'Doom'], ['irony', 'Irony'], ['achievements', 'Achievements']];
+    let body;
+    if (tab === 'achievements') {
+      body = FL.ACHIEVEMENTS.map((a) => meta.achievements.includes(a.id)
+        ? `<div class="acard legendary"><h5>${esc(a.name)}</h5>${esc(a.desc)}</div>`
+        : `<div class="acard locked">${esc(a.name)}<br>???</div>`).join('');
+    } else {
+      body = FL.ARCHIVE.filter((a) => tab === 'all' || a.tone === tab).map((a) => {
+        if (!meta.artifacts.includes(a.id)) return `<div class="acard locked ${a.rarity}">${a.rarity === 'legendary' ? 'LEGENDARY' : '???'}<br>${a.year}</div>`;
+        return `<div class="acard ${a.rarity}"><span class="yr">${a.year} · ${a.rarity}</span><h5>${esc(a.title)}</h5>
+          ${a.quote ? `<q>${esc(a.quote)}</q><span class="muted">${esc(a.speaker || '')}${a.paraphrase ? ' (paraphrase)' : ''}</span>` : ''}
+          <div>${esc(a.summary)}</div><div class="ls">${esc(a.lesson)}</div>
+          ${a.source ? `<a href="${esc(a.source)}" target="_blank" rel="noopener">source</a>` : ''}</div>`;
+      }).join('');
+    }
+    openModal(`<h1>The Archive</h1>
+      <h2>${meta.artifacts.length} of ${FL.ARCHIVE.length} artifacts · ${meta.achievements.length} of ${FL.ACHIEVEMENTS.length} achievements · collected across all your runs</h2>
+      <p class="note">Real quotes, memos and headlines from AI labs and startups — triumphs and disasters both. They unlock when your company does something history has seen before.</p>
+      <div class="tabs">${tabs.map(([id, n]) => `<button class="btn ${id === tab ? 'on' : ''}" data-action="archiveTab" data-arg="${id}">${n}</button>`).join('')}</div>
+      <div class="archive-grid">${body}</div>
+      <div class="btn-row" style="justify-content:flex-end"><button class="btn primary" data-action="${S ? 'closeModal' : 'start'}">Close</button></div>`);
+  }
+
+  function renderTicker() {
+    if (!S) return;
+    const items = [];
+    const h = S.history._cap || [];
+    S.rivals.forEach((r) => items.push(`<b>${esc(r.name)}</b> capability ${Math.floor(r.cap)}`));
+    items.push(`<b>${esc(S.company)}</b> ${money(S.valuation)} valuation`);
+    Sys.risks(S).slice(0, 2).forEach((r) => items.push(`<b>Whispers</b> ${esc(r.warn)}`));
+    const owned = FL.ARCHIVE.filter((a) => a.quote && (meta.artifacts.includes(a.id) || a.rarity === 'common'));
+    for (let i = 0; i < 3 && owned.length; i++) {
+      const a = owned[(S.turn * 7 + i * 13) % owned.length];
+      items.push(`"${esc(a.quote)}" — ${esc(a.speaker || 'unknown')}, ${a.year}`);
+    }
+    if (h.length > 1) items.push(`<b>Last quarter</b> +${(h[h.length - 1] - h[h.length - 2]).toFixed(1)} capability`);
+    const track = $('tickerTrack');
+    track.innerHTML = items.map((x) => `<span>${x}</span>`).join('');
+    track.style.animationDuration = Math.max(30, track.textContent.length / 6) + 's';
+  }
+
   UI.init = function () {
+    document.addEventListener('pointerdown', () => A.unlock(), { once: false });
     document.addEventListener('click', (e) => {
       const el = e.target.closest('[data-action]');
       if (el) { actions[el.dataset.action](el.dataset.arg, el); return; }
@@ -670,6 +850,7 @@
       else { selected = null; UI.renderAll(); }
     });
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'm' && !(e.target && e.target.tagName === 'INPUT')) { A.setMuted(!A.isMuted()); if (S) UI.renderTopbar(); return; }
       if (e.key === 'Escape' && !$('modal').classList.contains('hidden') && S && !S.pendingDilemma && !S.ended) closeModal();
       else if (e.key === 'Escape' && S) { selected = null; UI.renderAll(); }
     });
