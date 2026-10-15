@@ -268,3 +268,27 @@ table.fleet td { padding: 6px 4px; border-bottom: 1px solid var(--line-soft); } 
 #advisor .adv-head { display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
 #advisor .adv-head .btn { padding: 2px 8px; font-size: 11px; letter-spacing: 0; text-transform: none; }
 #advisor .adv-body { white-space: pre-wrap; line-height: 1.5; font-size: 13px; max-height: 40vh; overflow-y: auto; }
+
+/* ── Real quotes: splash, interstitial, newspaper ── */
+#splash { position: fixed; inset: 0; z-index: 60; background: radial-gradient(circle at 50% 40%, #13203a, #05070b 70%); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; padding: 24px; cursor: pointer; transition: opacity 450ms; }
+#splash.out { opacity: 0; }
+.splash-title { font-family: var(--mono); font-weight: 800; letter-spacing: .4em; font-size: clamp(32px, 6vw, 64px); color: var(--accent); }
+.splash-sub { color: var(--muted); margin: 8px 0 34px; letter-spacing: .06em; }
+.splash-quote, #interstitial { max-width: 680px; }
+.splash-quote q, #interstitial q { font-family: Georgia, serif; font-style: italic; font-size: clamp(17px, 2.2vw, 22px); line-height: 1.45; color: #e9e3ff; }
+.splash-quote .by, #interstitial .by { margin-top: 10px; color: var(--muted); font-size: 13px; }
+.splash-load { width: 220px; height: 3px; background: #1b2434; border-radius: 2px; margin-top: 34px; overflow: hidden; }
+.splash-load span { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; animation: load 3s linear forwards; }
+@keyframes load { from { transform: scaleX(0); } }
+.splash-hint { margin-top: 10px; font-size: 11px; color: var(--dim); }
+#interstitial { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 25; background: #0b1120ee; border: 1px solid var(--line);
+  border-radius: 12px; padding: 22px 26px; text-align: center; box-shadow: 0 20px 60px #000a; animation: rise 300ms ease-out; width: min(640px, calc(100vw - 32px)); }
+#interstitial .kicker { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--warn); margin-bottom: 10px; }
+.paper-cols { display: grid; grid-template-columns: 1fr 210px; gap: 16px; }
+.paper-quote { border-left: 1px solid #1c1a1755; padding-left: 14px; margin-top: 10px; font-size: 13px; }
+.paper-quote span { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
+.paper-quote q { font-style: italic; display: block; line-height: 1.4; }
+.paper-quote i { display: block; margin-top: 6px; font-size: 11.5px; color: #5b554c; font-style: normal; }
+.paper-archive { margin-top: 10px; padding-top: 8px; border-top: 1px solid #1c1a1733; font-size: 13px; color: #3b362f; line-height: 1.45; }
+@media (max-width: 700px) { .paper-cols { grid-template-columns: 1fr; } }

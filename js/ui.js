@@ -587,6 +587,7 @@
     }).join('');
     const h = r.headline || { paper: 'The Ledger', head: `${r.label} in review`, sub: '' };
     const epi = r.epigraph && artifactOf(r.epigraph);
+    const arch = r.fromArchive && artifactOf(r.fromArchive);
     const ob = r.objectives || { done: [], failed: [], dealt: [] };
     const obLines = ob.done.map((o) => `<div class="callout good"><b>Objective complete:</b> ${esc(o.text)} <span class="muted">(+4 bandwidth, ${esc(nameOf(o.owner))} pleased)</span></div>`).join('') +
       ob.failed.map((o) => `<div class="callout bad"><b>Objective missed:</b> ${esc(o.text)} <span class="muted">(${esc(nameOf(o.owner))} disappointed)</span></div>`).join('');
@@ -595,7 +596,9 @@
     openModal(`
       <div class="reveal">
       <div class="paper ${h.tabloid ? 'tabloid' : ''}"><div class="mast"><span>${esc(r.label)}</span><b>${esc(h.paper)}</b><span>Late edition</span></div>
-        <h1>${esc(h.head)}</h1><p>${esc(h.sub)}</p></div>
+        <div class="paper-cols"><div><h1>${esc(h.head)}</h1><p>${esc(h.sub)}</p>
+          ${arch ? `<div class="paper-archive"><b>From the archives, ${arch.year}:</b> ${esc(arch.title)}. ${esc(arch.summary)}</div>` : ''}</div>
+        ${epi ? `<aside class="paper-quote"><span>Quote of the quarter</span><q>${esc(epi.quote)}</q><i>— ${esc(epi.speaker || 'Unattributed')}, ${epi.year}${epi.paraphrase ? ' (paraphrase)' : ''}</i></aside>` : ''}</div></div>
       ${r.funding ? `<div class="callout ${r.funding.ok ? 'good' : 'bad'}"><b>${r.funding.name}.</b> ${esc(r.funding.text)}</div>` : ''}
       ${r.bridge ? `<div class="callout warn">${esc(r.bridge)}</div>` : ''}
       ${sitLine(r.started, 'started')}${sitLine(r.ended, 'ended')}
@@ -621,7 +624,6 @@
         </div>
         <div><h3>Biggest changes</h3><ul class="rep-list">${deltas || '<li class="muted">A quiet quarter.</li>'}</ul></div>
       </div>
-      ${epi ? `<div class="quote"><q>${esc(epi.quote)}</q><span class="by">${esc(epi.speaker || '')}${epi.speaker ? ', ' : ''}${epi.year}${epi.paraphrase ? ' (paraphrase)' : ''}</span></div>` : ''}
       <div class="btn-row" style="justify-content:flex-end"><button class="btn primary big" data-action="afterReport">Continue</button></div>
       </div>`);
     $('modalCard').querySelectorAll('.reveal > *').forEach((el, i) => (el.style.animationDelay = i * 140 + 'ms'));
@@ -747,12 +749,14 @@
       preview = {};
       A.play('endTurn');
       $('boardWrap').classList.add('thinking');
+      showInterstitial();
       const beforeVals = { ...S.values };
       setTimeout(() => {
         const r = E.endTurn(S);
         meta.runs += r && r.turn === 1 ? 1 : 0;
         save();
         $('boardWrap').classList.remove('thinking');
+        $('interstitial').classList.add('hidden');
         UI.renderAll();
         floatDeltas(beforeVals);
         A.setTension(S.tension || 0);
@@ -764,7 +768,7 @@
         busy = false;
         UI.showReport(r);
         if (done) done(r);
-      }, 420);
+      }, 1100);
     },
     afterReport: () => {
       if (S.unseen) { recordUnlocks(S.unseen); S.unseen = null; }
@@ -954,6 +958,30 @@
     return out.join('');
   }
 
+  /** A real quote, picked at random from the verified archive. */
+  function randomQuote() {
+    const q = FL.ARCHIVE.filter((a) => a.quote && a.quote.length < 160);
+    return q[Math.floor(Math.random() * q.length)];
+  }
+  function quoteHTML(a) {
+    return `<q>${esc(a.quote)}</q><div class="by">— ${esc(a.speaker || 'Unattributed')}, ${a.year}${a.paraphrase ? ' (paraphrase)' : ''}</div>`;
+  }
+  function showInterstitial() {
+    const box = $('interstitial');
+    if (!box || !S) return;
+    box.innerHTML = `<div class="kicker">${E.quarterLabel(S.turn)} closes</div>` + quoteHTML(randomQuote());
+    box.classList.remove('hidden');
+  }
+  function showSplash() {
+    const sp = $('splash');
+    if (!sp) return;
+    sp.querySelector('.splash-quote').innerHTML = quoteHTML(randomQuote());
+    sp.classList.remove('hidden');
+    const close = () => { sp.classList.add('out'); setTimeout(() => sp.classList.add('hidden'), 450); };
+    sp.addEventListener('click', close, { once: true });
+    setTimeout(close, 3200);
+  }
+
   function floatDeltas(before) {
     const svg = $('board');
     let n = 0;
@@ -1077,6 +1105,7 @@
     });
 
     if (FL.Bridge) FL.Bridge.connect();
+    showSplash();
     const saved = loadSave();
     if (saved && !saved.ended) {
       S = saved;

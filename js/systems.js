@@ -249,13 +249,17 @@
     return { paper, head, sub, tabloid };
   };
 
-  /** A quote for the quarter's report. Common artifacts shown this way are added to the archive. */
+  /** Real quote for the quarter's newspaper: one tied to this quarter's events when possible.
+   * Common artifacts shown this way are added to the archive. */
   S.epigraph = function (state, report) {
-    // Only commons or cards you already own, so epigraphs never spoil locked artifacts.
-    const pool = (FL.ARCHIVE || []).filter((a) => a.quote && (a.rarity === 'common' || state.artifacts.includes(a.id)));
-    if (!pool.length) return null;
-    const unseen = pool.filter((a) => !state.artifacts.includes(a.id));
-    const a = pick(state, unseen.length && E.rand(state) < 0.5 ? unseen : pool);
+    const quoted = (FL.ARCHIVE || []).filter((a) => a.quote);
+    if (!quoted.length) return null;
+    const keys = new Set([...(report.started || []).map((id) => 'situation:' + id), report.pitfall ? 'pitfall:' + report.pitfall : null,
+      ...Object.keys(state.policies).map((id) => 'policy:' + id), report.era ? 'era:' + report.era.id : null].filter(Boolean));
+    const related = quoted.filter((a) => [].concat(a.trigger).some((t) => keys.has(t)) && a.id !== state.lastEpigraph);
+    const fresh = quoted.filter((a) => a.id !== state.lastEpigraph);
+    const a = pick(state, related.length && E.rand(state) < 0.6 ? related : fresh);
+    state.lastEpigraph = a.id;
     if (a.rarity === 'common' && !state.artifacts.includes(a.id)) {
       state.artifacts.push(a.id);
       report.artifacts.push(a.id);
@@ -290,6 +294,9 @@
     state.tension = S.tension(state);
     report.tension = state.tension;
     report.epigraph = S.epigraph(state, report);
+    // "From the archives": the real precedent for something that happened this quarter.
+    const fromArchive = (report.artifacts || []).map((id) => FL.ARCHIVE.find((a) => a.id === id)).find((a) => a && a.rarity !== 'common');
+    report.fromArchive = fromArchive ? fromArchive.id : null;
     report.headline = S.headline(state, report);
   };
 
