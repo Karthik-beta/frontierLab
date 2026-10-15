@@ -21,7 +21,7 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Spectator mode and an end-of-match comparison screen
 
 ## Next
-- [ ] Rival labs that act (launch, poach, cut prices, lobby, have their own scandals), not just a capability number
+- [ ] Rivals with their own visible scandals and product launches; alliances and betrayals between AI rivals
 - [ ] Funding rounds you take part in (pitch, choose dilution, make promises to investors that come back to bite)
 - [ ] Executive team / cabinet: Chief Scientist, Head of Safety, CFO with loyalty and agendas (builds on hiring)
 - [ ] Overlapping stakeholder membership and polling (Democracy-style voter model)
@@ -38,6 +38,8 @@ Living roadmap. Newest decisions at the top of each section. See `docs/` for how
 - [ ] Localization (Italian first)
 
 ## Done
+- [x] Rival interactions: 7 hostile and 6 cooperative moves, relationships and grudges, hidden personas, AI rivals acting on you (poaching, suits, smears, price wars, proposals), player-vs-player relay in multiplayer
+- [x] Growth framed by startup canon: Blitzscaling stages (with coordination and culture costs), YC weekly growth bar, PMF (Sean Ellis 40%), burn multiple, default alive; YC-style objectives; verified canon artifacts and achievements
 - [x] Plague Inc-style growth: users spread region by region on a map; revenue is earned on actual users; regional bans and booms
 - [x] World events that help or hurt everyone, labs matching a condition, or random subsets (multiplayer: host rolls, each lab rolls its own subset coin)
 - [x] Cookie Clicker lessons: golden opportunities (incl. risky "wrath" ones), timed buffs, Legacy prestige perks, satirical evolving ticker, user milestones

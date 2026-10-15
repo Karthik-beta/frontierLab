@@ -407,6 +407,7 @@
       if (sp && sp.bandwidth) inc += Math.round(sp.bandwidth * (0.2 + 0.8 * p.level));
     }
     for (const s of FL.SITUATIONS) if (state.active[s.id] && s.special && s.special.bandwidth) inc += s.special.bandwidth;
+    if (FL.Growth && state.growth) inc += FL.Growth.stageBandwidth(state);
     return Math.max(1, inc);
   };
 
@@ -791,6 +792,8 @@
       case 'claimed': return `Claimed ${ev.name}: ${ev.text}`;
       case 'buff': return `Effect started: ${ev.name} (${ev.weeks} weeks)`;
       case 'users': return `Reached ${ev.text}`;
+      case 'stage': return `Blitzscaling stage: you are now a ${ev.name}. ${ev.note}`;
+      case 'pmf': return 'Product-market fit: over 40% of users would be very disappointed without you';
       case 'interaction': return ev.text;
       case 'attacked': return `Rival move: ${ev.text}`;
       case 'newspaper': { const n = (FL.Engine._lastPaper || {}); return `Quarterly newspaper printed${n.head ? ': "' + n.head + '"' : ''}`; }

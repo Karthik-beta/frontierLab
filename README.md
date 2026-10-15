@@ -44,6 +44,8 @@ into the game's advisor panel with `./frontier say`.
 | —                    | Multiplayer: real-time, peer to peer, friends + AI labs, chat        |
 | —                    | Plague Inc-style growth map; world events hitting all, some or random labs |
 | —                    | Cookie Clicker-style golden opportunities, buffs, Legacy prestige perks, joke ticker |
+| —                    | Rival moves: poach, price war, espionage, smears, pacts, licensing, acquisitions — and rivals that do it to you |
+| —                    | Startup scorecard: Blitzscaling stages, YC weekly growth bar, PMF, burn multiple, default alive |
 
 It runs in **real time**: the clock never stops for you, decisions expire, and you never see the
 whole picture. Rivals are estimates, your own safety is an eval estimate, and every run has a hidden

@@ -186,6 +186,7 @@
     for (const x of activePractices(state)) t += x.toxicity || 0;
     for (const v of activeValues(state)) t += v.toxicity || 0;
     if (activeValues(state).filter((v) => v.uber).length >= 3) t += 0.01; // a full "Superpumped" culture compounds
+    if (FL.Growth && state.growth) t += FL.Growth.stageToxicity(state); // blitzscaling: chaos grows with headcount
     const mult = activePractices(state).reduce((m, x) => m * (x.toxicityMult || 1), 1);
     return t > 0 ? t * mult : t;
   };

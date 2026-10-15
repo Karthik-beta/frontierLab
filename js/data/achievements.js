@@ -62,6 +62,13 @@
     {"id": "ach-picture-of-the-billboard", "name": "The Graffiti Is the Campaign", "trigger": "campaign:subway:worst", "desc": "Friend's $1M NYC subway ads were widely vandalized in 2025, and the CEO embraced it.", "source": "https://fortune.com/2025/10/01/who-is-avi-schiffmann-friend-ai-pendant-necklace"},
     {"id": "ach-we-missed-the-mark", "name": "We Missed the Mark", "trigger": "campaign:aiAd:worst", "desc": "Apple apologized for and pulled its 2024 iPad 'Crush!' ad.", "source": "https://9to5mac.com/2024/05/09/ipad-pro-crush-ad-apology/"},
     {"id": "ach-ps-i-love-you", "name": "P.S. I Love You", "trigger": "campaign:referral", "desc": "Hotmail's 1996 email footer made every message an ad.", "source": "https://techcrunch.com/2009/10/18/ps-i-love-you-get-your-free-email-at-hotmail"},
-    {"id": "ach-sock-puppet", "name": "Sock Puppet Memorial", "trigger": "campaign:superBowl:broke", "desc": "Pets.com ran a 2000 Super Bowl ad and liquidated that November.", "source": "https://en.wikipedia.org/wiki/Dot-com_commercials_during_Super_Bowl_XXXIV"}
+    {"id": "ach-sock-puppet", "name": "Sock Puppet Memorial", "trigger": "campaign:superBowl:broke", "desc": "Pets.com ran a 2000 Super Bowl ad and liquidated that November.", "source": "https://en.wikipedia.org/wiki/Dot-com_commercials_during_Super_Bowl_XXXIV"},
+    {"id": "ach-embarrassed", "name": "Mildly Mortified", "trigger": "dilemma:modelLaunch:0", "desc": "Hoffman: 'If you're not embarrassed by the first version of your product, you've launched too late.'", "source": "https://rowansimpson.com/quotes/embarassed/"},
+    {"id": "ach-ten-percent", "name": "Exceptionally Doing Well", "trigger": "growth:10pct", "desc": "PG: 10% weekly growth is 'exceptionally well' (5-7% is good).", "source": "https://paulgraham.com/growth.html"},
+    {"id": "ach-ramen", "name": "Instant Noodles, Infinite Leverage", "trigger": "ramen", "desc": "PG's ramen profitability.", "source": "https://paulgraham.com/ramenprofitable.html"},
+    {"id": "ach-default-alive", "name": "It's Alive!", "trigger": "defaultAlive", "desc": "PG's default alive test.", "source": "https://paulgraham.com/aord.html"},
+    {"id": "ach-forty-percent", "name": "Very Disappointed (Affectionately)", "trigger": "pmf", "desc": "Sean Ellis 40% 'very disappointed' PMF test; Superhuman 22% -> 58%.", "source": "https://review.firstround.com/how-superhuman-built-an-engine-to-find-product-market-fit/"},
+    {"id": "ach-nation", "name": "Now You're a Nation-State", "trigger": "stage:nation", "desc": "Blitzscaling's final stage at 10,000+ employees.", "source": "https://davidcummings.org/2015/12/13/the-startup-stages-in-blitzscaling/"},
+    {"id": "ach-let-it-burn", "name": "This Is Fine", "trigger": "fires:3", "desc": "Blitzscaling rule 'Let fires burn'.", "source": "https://www.shortform.com/blog/?p=35367"}
   );
 })(globalThis.FL = globalThis.FL || {});

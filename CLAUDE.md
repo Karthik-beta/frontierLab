@@ -22,6 +22,10 @@ When the user wants help playing (e.g. "help me with this quarter", "what should
    (weekly series; `--json` adds rival estimates), `./frontier world`, `./frontier growth`,
    `./frontier buffs`, and `./frontier export --json` for one complete JSON dump. Golden
    opportunities (`./frontier opps`, `./frontier claim <#id>`) vanish within a few game weeks.
+   `./frontier rivals` shows each rival's estimate, your relationship and your read on them;
+   `./frontier act <move> <rival>` makes a move (ask the player first). `./frontier growth`
+   includes the startup scorecard: Blitzscaling stage, weekly growth vs YC's 5-7% bar, PMF,
+   burn multiple, default alive/dead.
    You get the same fog the player gets: rival capabilities are estimates, safety is an eval
    estimate, and effects are qualitative. There is no hidden "correct" build to look up — every
    run has a different hidden world. Reason from evidence and say how sure you are.

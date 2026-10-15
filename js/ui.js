@@ -980,6 +980,24 @@
     $('modalCard').classList.add('wide');
   }
 
+  function scorecardHTML() {
+    const c = FL.Growth.scorecard(S);
+    const wg = c.weeklyGrowth;
+    const wgCls = wg == null ? '' : wg >= FL.YC_GROWTH.exceptional ? 'pos' : wg >= FL.YC_GROWTH.good ? 'pos' : wg >= 0.01 ? 'warn' : 'neg';
+    const da = c.defaultAlive;
+    const stages = FL.BLITZ_STAGES.map((st) => `<span class="buff ${st.name === c.stage ? '' : 'bad'}" style="${st.name === c.stage ? '' : 'opacity:.45'}">${st.name} ${st.min.toLocaleString()}+</span>`).join(' ');
+    return `<h3>Startup scorecard</h3>
+      <div class="rep-grid"><ul class="rep-list">
+        <li><span title="Blitzscaling (Hoffman & Yeh): stages by headcount">Blitzscaling stage</span><span class="m">${esc(c.stage)} · ~${c.headcount.toLocaleString()} people</span></li>
+        <li><span title="Paul Graham, Startup = Growth: 5-7%/week is good, 10% exceptional">Weekly growth (YC bar 5–7%)</span><span class="m ${wgCls}">${wg == null ? 'n/a' : (wg >= 0 ? '+' : '') + (wg * 100).toFixed(1) + '%/wk'}</span></li>
+        <li><span title="Sean Ellis test: 40%+ 'very disappointed' signals product-market fit">Product-market fit</span><span class="m ${c.pmf >= c.pmfBar ? 'pos' : ''}">${Math.round(c.pmf * 100)}% very disappointed${c.pmf >= c.pmfBar ? ' · fit' : ' · not yet'}</span></li>
+        <li><span title="David Sacks: net burn / net new ARR">Burn multiple</span><span class="m ${c.burnMultiple != null && c.burnMultiple > 3 ? 'neg' : ''}">${c.burnMultiple == null ? 'n/a' : c.burnMultiple.toFixed(1) + 'x'} · ${esc(c.burnLabel)}</span></li>
+        <li><span title="Paul Graham: at current costs and growth, do you reach profitability before the money runs out?">Default alive?</span><span class="m ${da.alive ? 'pos' : 'neg'}">${da.alive ? `alive · profitable in ~${da.quarters}q` : `dead · out of cash in ~${da.quarters}q without new money`}</span></li>
+      </ul>
+      <div><div class="buffs">${stages}</div><p class="note" style="margin-top:8px">${esc(c.stageNote)}</p>
+        <p class="note">Blitzscaling means choosing speed over efficiency when you can't be sure. Every stage brings new coordination costs, unless your executive team grows with you, and more cultural chaos, unless HR does.</p></div></div>`;
+  }
+
   function showGrowth() {
     const g = FL.Growth.summary(S);
     const maxPop = Math.max(...FL.REGIONS.map((r) => r.pop));
@@ -999,6 +1017,7 @@
     openModal(`<h1>Growth</h1>
       <h2>${fmtUsers(g.users)} users · ${fmtUsers(g.dau)} daily actives · ${Math.round(g.share * 100)}% of the online world${g.growthQoQ != null ? ` · ${g.growthQoQ >= 0 ? '+' : ''}${Math.round(g.growthQoQ * 100)}% this quarter` : ''}</h2>
       <svg class="map" viewBox="0 0 1000 480">${links.join('')}${nodes}</svg>
+      ${scorecardHTML()}
       <div class="rep-grid"><div><h3>Users over time</h3>${spark(series, 420, 70, { min: 0, color: '#22d3ee' })}
         <p class="note">Users spread like an outbreak: fast where your product appeals and neighbours already use it, slow where price, regulation or access hold it back. Revenue is earned on these users, not on appeal.</p></div>
       <div><h3>What moves it</h3><ul class="rep-list">
@@ -1328,6 +1347,8 @@
         case 'users': { A.play('milestone'); FX.flash('#4ade80'); const r = $('boardArea').getBoundingClientRect(); FX.burst(r.left + r.width / 2, r.top + r.height / 2, ['#4ade80', '#7dd3fc', '#fbbf24'], 70); T(`<span class="tk">Growth milestone</span><b>${esc(ev.text)}</b>`, 'legendary', 7000); break; }
         case 'interaction': A.play('click'); T(`<span class="tk">Your move</span>${esc(ev.text)}`, ev.hostile ? 'info' : 'good', 6000); break;
         case 'attacked': A.play(ev.good ? 'chime' : 'warn'); T(`<span class="tk">Rival move</span>${esc(ev.text)}`, ev.good ? 'good' : 'bad', 6000); if (!ev.good) FX.shake($('boardWrap'), 3, 220); break;
+        case 'stage': A.play('milestone'); T(`<span class="tk">Blitzscaling · new stage</span><b>You are now a ${esc(ev.name)}</b><br>${esc(ev.note)}`, 'legendary', 8000); break;
+        case 'pmf': A.play('milestone'); FX.flash('#4ade80'); T('<span class="tk">Product-market fit</span><b>40% of users would be very disappointed without you.</b>', 'legendary', 7000); break;
         case 'offerDeclined': T(`<span class="tk">Offer declined</span>${esc(ev.text)}`, 'bad', 4000); break;
       }
     }

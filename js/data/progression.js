@@ -87,10 +87,23 @@
       text: (p) => `Lift Morale to ${pctTxt(p.target)}`,
       met: (s, p) => v(s, 'morale') >= p.target, progress: (s, p) => v(s, 'morale') / p.target },
   ];
+  // Startup canon objectives (YC / Paul Graham / Sean Ellis)
+  FL.OBJECTIVES.push(
+    { id: 'ycGrowth', owner: 'investors', kind: 'hold', turns: 2, minTurn: 2,
+      setup: () => ({}), text: () => 'Grow users 5%+ a week (YC\'s bar) by the deadline',
+      met: (s) => FL.Growth && (FL.Growth.weeklyGrowth(s) || 0) >= 0.05, progress: (s) => Math.min(1, Math.max(0, (FL.Growth && FL.Growth.weeklyGrowth(s)) || 0) / 0.05) },
+    { id: 'defaultAlive', owner: 'board', kind: 'hold', turns: 5, minTurn: 8,
+      setup: () => ({}), text: () => 'Be default alive: on track to profitability before the cash runs out',
+      met: (s) => FL.Growth && FL.Growth.defaultAlive(s).alive, progress: (s) => (FL.Growth && FL.Growth.defaultAlive(s).alive ? 1 : 0.3) },
+    { id: 'pmfTarget', owner: 'consumers', kind: 'reach', turns: 5, minTurn: 3,
+      setup: () => ({}), text: () => 'Reach product-market fit (40% would be "very disappointed" without you)',
+      met: (s) => FL.Growth && FL.Growth.pmf(s) >= 0.4, progress: (s) => (FL.Growth ? FL.Growth.pmf(s) / 0.4 : 0) },
+  );
+
   FL.OBJECTIVE_SLOTS = [
-    { id: 'investors', name: 'Investor ask', pool: ['revTarget', 'adoptTarget', 'leadTarget'] },
-    { id: 'board', name: 'Board ask', pool: ['runwayHold', 'heatHold', 'legalHold'] },
-    { id: 'mission', name: 'Mission', pool: ['safetyTarget', 'trustTarget', 'capTarget', 'moraleTarget'] },
+    { id: 'investors', name: 'Investor ask', pool: ['revTarget', 'adoptTarget', 'leadTarget', 'ycGrowth'] },
+    { id: 'board', name: 'Board ask', pool: ['runwayHold', 'heatHold', 'legalHold', 'defaultAlive'] },
+    { id: 'mission', name: 'Mission', pool: ['safetyTarget', 'trustTarget', 'capTarget', 'moraleTarget', 'pmfTarget'] },
   ];
 
   /* Achievements persist across runs. trigger keys match Systems.fireTrigger. */

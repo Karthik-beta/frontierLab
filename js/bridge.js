@@ -317,7 +317,10 @@
       }
       case 'growth': case 'users': {
         const g = FL.Growth.summary(s);
-        return { ok: true, data: g, text: [`Users ${Math.round(g.users)}M · daily actives ${Math.round(g.dau)}M · ${Math.round(g.share * 100)}% of the online world${g.growthQoQ != null ? ` · ${Math.round(g.growthQoQ * 100)}% QoQ` : ''} · appeal ${pct(g.appeal)}`,
+        g.scorecard = FL.Growth.scorecard(s);
+        const c = g.scorecard;
+        const card = `Scorecard: ${c.stage} (~${c.headcount} people) · weekly growth ${c.weeklyGrowth == null ? 'n/a' : (c.weeklyGrowth * 100).toFixed(1) + '%'} (YC bar 5-7%) · PMF ${Math.round(c.pmf * 100)}% (bar 40%) · burn multiple ${c.burnMultiple == null ? 'n/a' : c.burnMultiple.toFixed(1) + 'x'} (${c.burnLabel}) · ${c.defaultAlive.alive ? 'default alive' : 'default dead'} (~${c.defaultAlive.quarters}q)`;
+        return { ok: true, data: g, text: [card, `Users ${Math.round(g.users)}M · daily actives ${Math.round(g.dau)}M · ${Math.round(g.share * 100)}% of the online world${g.growthQoQ != null ? ` · ${Math.round(g.growthQoQ * 100)}% QoQ` : ''} · appeal ${pct(g.appeal)}`,
           ...g.regions.map((r) => `  ${r.name.padEnd(24)} ${String(Math.round(r.users)).padStart(5)}M  ${pct(r.share)}${r.event.ban ? ' · restricted' : r.event.boost > 1 ? ' · booming' : ''}`)].join('\n') };
       }
       case 'opps': case 'opportunities': {

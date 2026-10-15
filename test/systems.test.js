@@ -26,6 +26,9 @@ function validTrigger(k) {
   if ((m = k.match(/^(cap|turn|team):\d+$/))) return true;
   if ((m = k.match(/^dilemma:(.+?):(\d):(win|lose)$/))) return dilIds.has(m[1]);
   if ((m = k.match(/^users:\d+$/))) return true;
+  if ((m = k.match(/^stage:(\w+)$/))) return FL.BLITZ_STAGES.some((x) => x.id === m[1]);
+  if (['pmf', 'growth:10pct', 'growth:5pct', 'defaultAlive', 'act:espionage:caught', 'fires:3', 'ramen', 'burn:bad'].includes(k)) return true;
+  if ((m = k.match(/^act:(\w+)$/))) return FL.INTERACTIONS.some((x) => x.id === m[1]);
   if ((m = k.match(/^opp:(claim|10|wrath:win|wrath:lose)$/))) return true;
   if ((m = k.match(/^world:(\w+)(:spared)?$/))) return FL.WORLD_EVENTS.some((e) => e.id === m[1]);
   if ((m = k.match(/^campaign:(\w+)(:best|:worst|:broke)?$/))) return FL.CAMPAIGNS.some((c) => c.id === m[1]);
