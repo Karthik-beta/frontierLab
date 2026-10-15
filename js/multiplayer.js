@@ -247,7 +247,9 @@
       const rid = 'mp-' + p.id;
       let r = s.rivals.find((x) => x.id === rid);
       if (!r) { r = { id: rid, remote: true, rate: 0 }; s.rivals.push(r); }
+      const changed = r.cap !== p.cap;
       Object.assign(r, { name: p.company + (p.bot ? ' (AI)' : ''), color: p.color, cap: p.cap, player: p.name });
+      if (changed && FL.Fog) FL.Fog.observeRival(s, rid, p.cap, 1.5, 'model release');
     }
     if (!s.ended) {
       const end = E.checkEnding(s);
@@ -257,7 +259,8 @@
 
   function snapshotOf(s) {
     const h = (s.history._cap || []).length;
-    return { cap: s.cap, valuation: s.valuation, quarter: E.quarterLabel(s.turn), headline: (s._lastHeadline || ''), ended: s.ended ? { id: s.ended.id, title: s.ended.title, win: s.ended.win } : null, turns: h };
+    // Only public information leaves your browser: your last released model generation.
+    return { cap: s.cap >= E.AGI ? s.cap : Math.floor(s.cap / 10) * 10, valuation: s.valuation, quarter: E.quarterLabel(s.turn), headline: (s._lastHeadline || ''), ended: s.ended ? { id: s.ended.id, title: s.ended.title, win: s.ended.win } : null, turns: h };
   }
 
   /** Called by the UI after this player's quarter has been played. */

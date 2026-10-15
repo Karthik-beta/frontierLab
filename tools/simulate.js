@@ -12,7 +12,7 @@ function play(arch, bot, seed, verbose, dif) {
   while (!s.ended) {
     BOTS[bot](s);
     r = E.endTurn(s);
-    if (s.pendingDilemma) E.resolveDilemma(s, E.rand(s) < 0.5 ? 0 : 1);
+    while (s.pendingDilemma && !s.ended) E.resolveDilemma(s, E.rand(s) < 0.5 ? 0 : 1);
     if (verbose) {
       console.log(`${r.label} cash=${E.fmtMoney(s.cash)} net=${E.fmtMoney(s.finance.net)} rev=${E.fmtMoney(s.finance.revenue)} cap=${s.cap.toFixed(1)} rival=${E.bestRival(s).cap.toFixed(1)} vel=${s.values.velocity.toFixed(2)} saf=${s.values.safety.toFixed(2)} adop=${s.values.adoption.toFixed(2)} heat=${s.values.regHeat.toFixed(2)} board=${s.happiness.board.toFixed(2)} inv=${s.happiness.investors.toFixed(2)} bw=${s.bandwidth} val=${E.fmtMoney(s.valuation)} sit=[${Object.keys(s.active).filter((k) => s.active[k]).join(',')}]${r.funding ? ' ROUND ' + r.funding.text : ''}`);
     }

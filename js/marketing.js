@@ -8,7 +8,7 @@
   const quarterOfYear = (turn) => ((turn - 1) % 4) + 1;
 
   M.init = function (state) {
-    state.mkt = { booked: [], last: {}, history: [] };
+    state.mkt = { booked: [], bookedAt: {}, last: {}, history: [] };
   };
 
   M.cost = (state, c) => c.cost * Math.pow(1.06, state.turn - 1);
@@ -19,7 +19,8 @@
     if (mk.booked.includes(c.id)) return 'Booked for this quarter.';
     if (c.onlyQ && quarterOfYear(state.turn) !== c.onlyQ) return `Only in Q${c.onlyQ}.`;
     const last = mk.last[c.id];
-    if (last != null && state.turn - last < c.cooldown) return `Available again in ${c.cooldown - (state.turn - last)}q.`;
+    const t = state.t || 0;
+    if (last != null && t - last < c.cooldown) return `Available again in ${Math.ceil((c.cooldown - (t - last)) * 13)} weeks.`;
     if (state.bandwidth < c.bandwidth) return `Needs ${c.bandwidth} bandwidth.`;
     if (state.cash < M.cost(state, c)) return 'Not enough cash.';
     return null;
@@ -34,6 +35,8 @@
     state.cash -= M.cost(state, c);
     state.bandwidth -= c.bandwidth;
     state.mkt.booked.push(c.id);
+    state.mkt.bookedAt = state.mkt.bookedAt || {};
+    state.mkt.bookedAt[c.id] = state.t || 0;
     state.log.push({ turn: state.turn, text: `Booked campaign: ${c.name}` });
     return { ok: true };
   };
@@ -46,12 +49,16 @@
     return { ok: true };
   };
 
-  /** Resolve booked campaigns. Better products and bigger brands tilt the odds. */
-  M.update = function (state, report) {
+  M.RUN_QUARTERS = 4 / 13; // campaigns run for about a month before results are in
+
+  /** Resolve campaigns that have finished running. Better products and bigger brands tilt the odds. */
+  M.update = function (state, report, dt) {
     const mk = state.mkt;
     if (!mk) return;
-    const results = [];
-    for (const id of mk.booked) {
+    mk.bookedAt = mk.bookedAt || {};
+    const results = report.campaigns || (report.campaigns = []);
+    const due = mk.booked.filter((id) => (state.t || 0) - (mk.bookedAt[id] || 0) >= M.RUN_QUARTERS);
+    for (const id of due) {
       const c = camp(id);
       const tilt = (c.quality ? state.values.quality - 0.4 : 0) * 0.5 + (state.values.brand - 0.2) * 0.2;
       // Shift probability toward the first (best) outcome by `tilt`, renormalised.
@@ -61,11 +68,12 @@
       while (k < ps.length - 1 && x > ps[k]) { x -= ps[k]; k++; }
       const o = c.outcomes[k];
       (o.fx || []).forEach(([to, amt, turns]) => state.shocks.push({ to, amt, turns: turns || 4, left: turns || 4 }));
-      mk.last[id] = state.turn;
+      mk.last[id] = state.t || 0;
       const reach = Math.round((5 + 120 * state.values.brand + 60 * state.values.hype) * (0.6 + 0.8 * E.rand(state)));
       const res = { id, name: c.name, label: o.label, best: k === 0, worst: k === c.outcomes.length - 1 && c.outcomes.length > 1, reach };
       results.push(res);
       mk.history.push({ turn: state.turn, ...res });
+      E.emit(state, { type: 'campaign', ...res });
       if (FL.Systems) {
         FL.Systems.fireTrigger(state, 'campaign:' + id, report);
         if (res.best) FL.Systems.fireTrigger(state, 'campaign:' + id + ':best', report);
@@ -73,8 +81,7 @@
         if (id === 'superBowl' && state.values.runway < 0.5) FL.Systems.fireTrigger(state, 'campaign:superBowl:broke', report);
       }
     }
-    mk.booked = [];
-    if (report) report.campaigns = results;
+    mk.booked = mk.booked.filter((id) => !due.includes(id));
   };
 
   /** Chance used by the launch dilemma's chance outcomes. */

@@ -41,7 +41,7 @@
     comp: 'PAY', tenders: 'TO', poach: 'PO', culture: 'MC', crunch: 'CR', hiring: 'HI',
     consumerApp: 'APP', freeTier: 'FT', api: 'API', pricing: 'PR', entSales: 'ENT', coding: 'COD', ads: 'ADS', moderation: 'CF',
     redteam: 'RT', rsp: 'RSP', audits: 'AU', secProgram: 'SEC', lobbying: 'LOB', defense: 'DEF', licensing: 'LIC', scraping: 'WS',
-    marketing: 'BC', ceoTour: 'CEO', nonprofit: 'NP', benchmarks: 'BX', execTeam: 'EX', devRel: 'DEV', creators: 'CRE', prTeam: 'COM', community: 'CMY',
+    marketing: 'BC', ceoTour: 'CEO', nonprofit: 'NP', benchmarks: 'BX', execTeam: 'EX', devRel: 'DEV', creators: 'CRE', prTeam: 'COM', community: 'CMY', intel: 'INT',
     board: 'BD', investors: 'VC', researchers: 'RS', safetyCommunity: 'SC', enterprise: 'EC', consumers: 'CU', regulators: 'RG', openSource: 'OS', media: 'MD', partner: 'BT',
     talentExodus: 'TE', gpuCrunch: 'GS', probe: 'INV', injunction: 'INJ', lawsuit: 'LAW', jailbreak: 'JB', weightsLeak: 'WL', aiPanic: 'AP',
     misuse: 'MIS', bubble: 'BUB', viral: 'VIR', frontierLeader: '#1', missionCulture: 'MDC',

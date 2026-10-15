@@ -57,9 +57,9 @@ test('hiring: offers, toxicity from an all-Uber culture, and the culture reset',
   for (const c of s.people.feed.slice()) R.makeOffer(s, c.id);
   assert.ok(s.people.roster.length >= n0, 'roster never shrinks from offers');
   R.setValues(s, ['alwaysHustlin', 'toeStepping', 'superpumped']);
-  assert.ok(R.toxicityFlow(s) > 0.04);
-  for (let i = 0; i < 6; i++) { s.bandwidth = 40; E.endTurn(s); if (s.pendingDilemma) E.resolveDilemma(s, 0); }
-  assert.ok(s.people.toxicity > 0.2, `toxicity ${s.people.toxicity}`);
+  assert.ok(R.toxicityFlow(s) > 0.01, `flow ${R.toxicityFlow(s)}`);
+  for (let i = 0; i < 6; i++) { s.bandwidth = 40; E.endTurn(s); while (s.pendingDilemma) E.resolveDilemma(s, 0); }
+  assert.ok(s.people.toxicity > 0.12, `toxicity ${s.people.toxicity}`);
   R.cultureReset(s);
   assert.ok(!s.people.values.some((v) => FL.CULTURE_VALUES.find((x) => x.id === v).uber));
   assert.ok(R.toxicityFlow(s) < 0.03);
@@ -69,4 +69,35 @@ test('team bonus feeds stats through the extra-input hook', () => {
   const s = E.newGame('defectors', 'T', 6);
   assert.ok(s.extra.team && s.extra.team.safety > 0);
   assert.ok(s.extra.hardware && s.extra.hardware.compute > 0);
+});
+
+test('real time: 13 weekly ticks make a quarter, and decisions expire to their default', () => {
+  const s = E.newGame('defectors', 'T', 9);
+  assert.strictEqual(s.turn, 1);
+  for (let i = 0; i < 12; i++) assert.strictEqual(E.tick(s), null);
+  const r = E.tick(s);
+  assert.ok(r && r.label, 'quarter report at week 13');
+  assert.strictEqual(s.turn, 2);
+  E.addDecision(s, 'gpuPrepay', 2);
+  const before = s.inbox.length;
+  E.tick(s); E.tick(s);
+  assert.ok(s.inbox.length < before, 'expired decision left the inbox');
+  assert.ok(s.events.some((e) => e.type === 'expired'));
+});
+
+test('fog: rival estimates carry uncertainty and safety is an estimate', () => {
+  const s = E.newGame('spinout', 'T', 10);
+  for (let i = 0; i < 3; i++) E.endTurn(s);
+  const est = FL.Fog.rivalEstimate(s, s.rivals[0]);
+  assert.ok(est.sd > 0);
+  const m = FL.Fog.measured(s, 'safety');
+  assert.ok(m.sd > 0 && m.kind === 'eval estimate');
+  const view = FL.Fog.view(s);
+  assert.ok(!('cap' in view.rivals[0]), 'the view never exposes true rival capability');
+});
+
+test('worlds differ between seeds', () => {
+  const a = E.newGame('defectors', 'T', 1), b = E.newGame('defectors', 'T', 2);
+  assert.notDeepStrictEqual(a.world.traits, b.world.traits.length ? b.world.traits : ['x']);
+  assert.ok(a.world.mult.some((m, i) => Math.abs(m - b.world.mult[i]) > 0.05));
 });

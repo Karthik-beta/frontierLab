@@ -61,7 +61,7 @@
       role, seniority: sen, skill: clamp(Math.round(skill), 10, 100), traits,
       revealed: traits.filter((t) => !traitOf(t).hidden),
       from, salary: FL.SENIORITY_PAY[sen] * payScale(state) * (0.85 + rnd(state) * 0.3),
-      connections: 200 + Math.floor(rnd(state) * 1800), expires: state.turn + 2,
+      connections: 200 + Math.floor(rnd(state) * 1800), expires: (state.t || 0) + 0.6 + rnd(state) * 0.8,
     };
   };
 
@@ -78,7 +78,7 @@
   /** Keep 4-6 candidates in the feed. Some take other offers if you wait. */
   R.refreshFeed = function (state) {
     const P = state.people;
-    P.feed = P.feed.filter((c) => c.expires > state.turn);
+    P.feed = P.feed.filter((c) => c.expires > (state.t || 0));
     const target = 4 + Math.min(2, Math.floor(state.turn / 8));
     while (P.feed.length < target) P.feed.push(R.makeCandidate(state));
   };
@@ -106,6 +106,8 @@
       R.reveal(state, c);
       R.add(state, c);
       state.log.push({ turn: state.turn, text: `Hired ${c.name}, ${R.headline(c)}` });
+      const exRival = state.rivals.find((r) => c.from === `ex-${r.name.replace(/ \(.*\)/, '')}`);
+      if (exRival && FL.Fog) FL.Fog.observeRival(state, exRival.id, exRival.cap + (E.rand(state) - 0.5) * 4, 2, `${c.name} (ex-employee)`);
       const res = { ok: true, accepted: true, person: c, artifacts: [], achievements: [] };
       if (FL.Systems) {
         FL.Systems.fireTrigger(state, 'hire:' + c.role, res);
@@ -239,51 +241,50 @@
   };
 
   /** Per-quarter: auto-hires via managers, culling, attrition, leaks, toxicity. */
-  R.update = function (state, report) {
+  /** dt quarters of people dynamics (one game week in real time). */
+  R.update = function (state, report, dt) {
+    dt = dt || 1;
     const P = state.people;
     if (!P) return null;
-    const res = { hired: [], left: [], leaks: [], culled: [], toxicity: 0 };
+    const res = report.people || (report.people = { hired: [], left: [], leaks: [], culled: [], toxicity: 0 });
     const prs = activePractices(state);
     const blocked = prs.map((x) => x.blocks).filter(Boolean);
 
-    // Hiring managers recruit automatically.
+    // Hiring managers recruit continuously.
     for (const m of P.managers) {
       const mp = P.roster.find((x) => x.id === m.id);
       if (!mp) continue;
       let vol = 1 + Math.floor(mp.skill / 45) + prs.reduce((a, x) => a + (x.volume || 0), 0);
       let quality = (mp.skill - 50) * 0.3 + prs.reduce((a, x) => a + (x.quality || 0), 0);
       for (const tr of mp.traits) { vol += traitOf(tr).managerVolume || 0; quality += traitOf(tr).managerQuality || 0; }
-      vol = Math.max(0, Math.round(vol + (rnd(state) - 0.5)));
-      for (let i = 0; i < vol; i++) {
+      m.acc = (m.acc || 0) + Math.max(0, vol) * dt;
+      const n = Math.floor(m.acc);
+      m.acc -= n;
+      for (let i = 0; i < n; i++) {
         const c = R.makeCandidate(state, { role: m.focus, quality, seniority: rnd(state) < 0.75 ? Math.floor(rnd(state) * 2) : 2 });
         if (blocked.some((b) => c.traits.includes(b))) continue;
         if (rnd(state) > R.acceptChance(state, c) + 0.15) continue;
         R.reveal(state, c);
         R.add(state, c);
         res.hired.push(c.name);
+        E.emit(state, { type: 'hired', name: c.name, headline: R.headline(c), auto: true });
         if (has(c, 'jerk') && FL.Systems && report) FL.Systems.fireTrigger(state, 'hire:jerk', report);
         const ptq = prs.find((x) => x.id === 'payToQuit');
         if (ptq) state.cash -= ptq.costPerHire * 100;
       }
     }
 
-    // Keeper test: let go of the weakest.
-    const keeper = prs.find((x) => x.id === 'keeperTest');
-    if (keeper && P.roster.length > 6) {
-      const n = Math.floor(P.roster.length * keeper.cull);
-      const sorted = P.roster.filter((p) => !p.founder).sort((a, b) => a.skill - b.skill).slice(0, n);
-      for (const p of sorted) { res.culled.push(p.name); P.roster = P.roster.filter((x) => x !== p); }
-    }
-
-    // Attrition and leaks.
+    // Attrition and leaks happen any week.
     P.roster = P.roster.filter((p) => {
-      if (has(p, 'leaker') && rnd(state) < traitOf('leaker').leak) {
+      if (has(p, 'leaker') && rnd(state) < traitOf('leaker').leak * dt) {
         res.leaks.push(p.name);
         state.shocks.push({ to: 'media', amt: -0.12, turns: 3, left: 3 });
         state.shocks.push({ to: 'legal', amt: 0.04, turns: 4, left: 4 });
+        E.emit(state, { type: 'leak' });
       }
-      if (rnd(state) < R.leaveChance(state, p)) {
+      if (rnd(state) < R.leaveChance(state, p) * dt) {
         res.left.push(`${p.name} (${FL.SENIORITY[p.seniority]} ${roleOf(p.role).name})`);
+        E.emit(state, { type: 'left', name: p.name, headline: R.headline(p) });
         P.departed++;
         if (p.seniority >= 3) { E.bestRival(state).cap += 0.5 + p.seniority * 0.3; res.seniorLeft = true; }
         P.managers = P.managers.filter((m) => m.id !== p.id);
@@ -292,16 +293,31 @@
       return true;
     });
 
-    P.toxicity = clamp(P.toxicity + R.toxicityFlow(state), 0, 1);
+    P.toxicity = clamp(P.toxicity + R.toxicityFlow(state) * dt, 0, 1);
     res.toxicity = P.toxicity;
+    // Candidates show up (and take other offers) continuously.
+    P.feed = P.feed.filter((c) => c.expires > (state.t || 0));
+    const target = 4 + Math.min(2, Math.floor(state.turn / 8));
+    if (P.feed.length < target && rnd(state) < 2.5 * dt) P.feed.push(R.makeCandidate(state));
     if (FL.Systems && report) {
       if (res.seniorLeft) FL.Systems.fireTrigger(state, 'people:seniorLeft', report);
       if (P.roster.length >= 5) FL.Systems.fireTrigger(state, 'team:5', report);
       if (P.roster.length >= 25) FL.Systems.fireTrigger(state, 'team:25', report);
     }
-    R.refreshFeed(state);
-    if (report) report.people = res;
     return res;
+  };
+
+  /** Quarter-end people processes (the keeper test runs as a quarterly review). */
+  R.quarter = function (state, report) {
+    const P = state.people;
+    if (!P) return;
+    const res = report.people || (report.people = { hired: [], left: [], leaks: [], culled: [], toxicity: P.toxicity });
+    const keeper = activePractices(state).find((x) => x.id === 'keeperTest');
+    if (keeper && P.roster.length > 6) {
+      const n = Math.floor(P.roster.length * keeper.cull);
+      const sorted = P.roster.filter((p) => !p.founder).sort((a, b) => a.skill - b.skill).slice(0, n);
+      for (const p of sorted) { res.culled.push(p.name); P.roster = P.roster.filter((x) => x !== p); }
+    }
   };
 
   /** After an independent investigation: drop the values, purge the jerks, drain toxicity. */

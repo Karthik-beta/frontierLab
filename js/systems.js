@@ -21,7 +21,8 @@
   const policyStrength = (state) => (id) => (state.policies[id] ? 0.2 + 0.8 * state.policies[id].level : 0);
 
   /** Advance every pitfall meter; report warning signs and fire at most one pitfall per quarter. */
-  S.updatePitfalls = function (state, report) {
+  S.updatePitfalls = function (state, report, dt) {
+    dt = dt || 1;
     const P = policyStrength(state);
     report.pitfallWarnings = report.pitfallWarnings || [];
     const ready = [];
@@ -34,17 +35,24 @@
       try { rate = p.rate(state, P); } catch (e) { rate = 0; }
       if (!Number.isFinite(rate)) rate = 0;
       if (rate > 0) rate *= E.diff(state).pitfallPace;
+      rate *= dt;
       const m = clamp(prev + rate, 0, 1.2);
       state.meters[p.id] = m;
       WARN_AT.forEach((t, i) => {
-        if (prev < t && m >= t) report.pitfallWarnings.push({ id: p.id, name: p.name, horizon: p.horizon, text: p.warn[i], level: i + 1 });
+        if (prev < t && m >= t) {
+          const w = { id: p.id, name: p.name, horizon: p.horizon, text: p.warn[i], level: i + 1 };
+          report.pitfallWarnings.push(w);
+          E.emit(state, { type: 'warning', ...w });
+        }
       });
       if (m >= 1) ready.push(p);
     }
-    if (!ready.length || state.dilemmaQueue.length) return;
+    // At most one pitfall springs per quarter, and never into a full inbox.
+    if (!ready.length || state.inbox.length >= 3 || state.week - (state.lastPitfallWeek == null ? -99 : state.lastPitfallWeek) < E.TICKS_PER_Q) return;
     ready.sort((a, b) => state.meters[b.id] - state.meters[a.id]);
     const p = ready[0];
-    state.dilemmaQueue.push('pit:' + p.id);
+    state.lastPitfallWeek = state.week;
+    E.addDecision(state, 'pit:' + p.id);
     state.pitfallsFired[p.id] = state.turn;
     state.meters[p.id] = 0.15;
     state.lastEventTurn = state.turn;
@@ -74,17 +82,19 @@
       if (state.artifacts.includes(a.id) || !triggersOf(a).includes(key)) continue;
       state.artifacts.push(a.id);
       sink.artifacts.push(a.id);
+      E.emit(state, { type: 'unlock', artifact: a.id });
     }
     state.achievementsRun = state.achievementsRun || [];
     for (const a of FL.ACHIEVEMENTS || []) {
       if (a.trigger !== key || state.achievementsRun.includes(a.id)) continue;
       state.achievementsRun.push(a.id);
       sink.achievements.push(a.id);
+      E.emit(state, { type: 'unlock', achievement: a.id });
     }
   };
 
-  /** Emit triggers implied by the quarter's state changes. */
-  S.scanTriggers = function (state, report) {
+  /** Emit triggers implied by policies (checked every week). */
+  S.scanPolicyTriggers = function (state, report) {
     state.seenPolicies = state.seenPolicies || {};
     for (const [id, p] of Object.entries(state.policies)) {
       if (!state.seenPolicies[id]) { state.seenPolicies[id] = true; S.fireTrigger(state, 'policy:' + id, report); }
@@ -95,6 +105,10 @@
       state.seenPolicies[id + ':cancel'] = true;
       S.fireTrigger(state, 'cancel:' + id, report);
     }
+  };
+
+  /** Emit triggers implied by the finished quarter. */
+  S.scanTriggers = function (state, report) {
     (report.started || []).forEach((id) => S.fireTrigger(state, 'situation:' + id, report));
     if (report.funding) {
       S.fireTrigger(state, report.funding.ok ? 'round:ok' : 'round:failed', report);
@@ -119,6 +133,7 @@
         state.milestones[key] = state.turn;
         state.lastModel = g.name;
         report.milestones.push({ kind: 'model', name: g.name, at: g.at, blurb: g.blurb });
+        E.emit(state, { type: 'milestone', kind: 'model', name: g.name, at: g.at, blurb: g.blurb });
         if (FL.Marketing && state.cap < E.AGI) FL.Marketing.onModelShipped(state);
         S.fireTrigger(state, 'model:' + g.name, report);
         S.fireTrigger(state, 'cap:' + g.at, report);
@@ -129,6 +144,7 @@
       if (state.valuation >= t.at && !state.milestones[key]) {
         state.milestones[key] = state.turn;
         report.milestones.push({ kind: 'tier', name: t.name, at: t.at, blurb: t.blurb });
+        E.emit(state, { type: 'milestone', kind: 'tier', name: t.name, blurb: t.blurb });
         S.fireTrigger(state, 'tier:' + t.name, report);
       }
     }
@@ -156,7 +172,7 @@
 
   /** Resolve due objectives (rewards/penalties) and deal new ones into empty slots. */
   S.updateObjectives = function (state, report) {
-    const res = { done: [], failed: [], dealt: [] };
+    const res = report.objectives || (report.objectives = { done: [], failed: [], dealt: [] });
     state.lastObjective = state.lastObjective || {};
     state.objectiveCooldown = state.objectiveCooldown || {};
     state.objectives = state.objectives.filter((o) => {
@@ -166,11 +182,13 @@
       const due = state.turn >= o.deadline;
       if ((t.kind === 'reach' && met) || (due && met)) {
         res.done.push(o);
+        E.emit(state, { type: 'objective', done: true, text: o.text });
         state.objectivesDone++;
         state.bandwidth = Math.min(E.BANDWIDTH_CAP, state.bandwidth + 4);
         state.shocks.push({ to: o.owner, amt: 0.18, turns: 5, left: 5 });
       } else if (due) {
         res.failed.push(o);
+        E.emit(state, { type: 'objective', done: false, text: o.text });
         state.shocks.push({ to: o.owner, amt: -0.15, turns: 4, left: 4 });
       } else return true;
       state.lastObjective[o.slot] = o.id;
@@ -184,7 +202,6 @@
       if (o) res.dealt.push(o);
     }
     if (state.objectivesDone >= 10) S.fireTrigger(state, 'objectives:10', report);
-    report.objectives = res;
   };
 
   // ── Eras, director, tension ──────────────────────────────
@@ -264,6 +281,7 @@
     if (a.rarity === 'common' && !state.artifacts.includes(a.id)) {
       state.artifacts.push(a.id);
       report.artifacts.push(a.id);
+      E.emit(state, { type: 'unlock', artifact: a.id });
     }
     return a.id;
   };
@@ -280,22 +298,27 @@
     for (const slot of FL.OBJECTIVE_SLOTS) S.dealObjective(state, slot);
   };
 
-  /** Called by E.endTurn after the core update (state.turn is already the new quarter). */
-  S.run = function (state, report) {
+  /** Every game week. */
+  S.tick = function (state, qr, dt) {
+    if ((qr.started || []).length) state.lastEventTurn = state.turn;
+    S.checkMilestones(state, qr);
+    S.scanPolicyTriggers(state, qr);
+    S.updatePitfalls(state, qr, dt);
+    S.updateObjectives(state, qr);
+    const era = S.eraOf(state);
+    if (era.id !== state.era) { state.era = era.id; qr.era = era; S.fireTrigger(state, 'era:' + era.id, qr); E.emit(state, { type: 'era', era: era.id }); }
+    state.tension = S.tension(state);
+  };
+
+  /** At each quarter end (state.turn is already the new quarter). */
+  S.quarter = function (state, report) {
     report.artifacts = report.artifacts || [];
     report.achievements = report.achievements || [];
-    if ((report.started || []).length || report.funding) state.lastEventTurn = state.turn;
-    S.checkMilestones(state, report);
+    if (report.funding) state.lastEventTurn = state.turn;
     S.scanTriggers(state, report);
-    S.updatePitfalls(state, report);
-    S.updateObjectives(state, report);
-    const era = S.eraOf(state);
-    if (era.id !== state.era) { state.era = era.id; report.era = era; S.fireTrigger(state, 'era:' + era.id, report); }
     report.rumors = S.rumors(state);
-    state.tension = S.tension(state);
     report.tension = state.tension;
     report.epigraph = S.epigraph(state, report);
-    // "From the archives": the real precedent for something that happened this quarter.
     const fromArchive = (report.artifacts || []).map((id) => FL.ARCHIVE.find((a) => a.id === id)).find((a) => a && a.rarity !== 'common');
     report.fromArchive = fromArchive ? fromArchive.id : null;
     report.headline = S.headline(state, report);

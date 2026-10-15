@@ -33,7 +33,7 @@
   H.lifeQuarters = (state) => (state.difficulty === 'realistic' ? 12 : state.difficulty === 'easy' ? 24 : cfg().lifeQuarters);
 
   H.init = function (state, arch) {
-    state.hw = { fleet: [], pipeline: [], leases: [], offers: [], power: cfg().basePower, spotPerf: 0, nextId: 1 };
+    state.hw = { fleet: [], pipeline: [], leases: [], offers: [], power: cfg().basePower, spotPerf: 0, nextId: 1, gen: null };
     for (const f of (arch && arch.fleet) || []) {
       const g = genById(f.gen);
       state.hw.fleet.push({ id: state.hw.nextId++, gen: g.id, pods: f.pods, acquired: -4, health: 1, cost: f.pods * g.price, book: f.pods * g.price * 0.8 });
@@ -89,63 +89,73 @@
   H.bookValue = (state) => (state.hw ? state.hw.fleet.reduce((a, c) => a + c.book, 0) : 0);
 
   /** One quarter of fleet dynamics. Called after the quarter's cash has been paid. */
-  H.update = function (state, report) {
+  /** dt quarters of fleet dynamics (one game week in real time). Times are in quarters (state.t). */
+  H.update = function (state, report, dt) {
+    dt = dt || 1;
     const hw = state.hw;
     if (!hw) return null;
-    const res = { delivered: 0, failed: 0, expired: [], newGen: null };
+    const now = state.t || 0;
+    const res = report.hardware || (report.hardware = { delivered: 0, failed: 0, expired: [], newGen: null });
     const gen = H.currentGen(state);
-    if (gen.turn === state.turn) res.newGen = gen.name;
+    if (hw.gen !== gen.id) { hw.gen = gen.id; if (now > 0) { res.newGen = gen.name; E.emit(state, { type: 'newGen', name: gen.name }); res.newGenNow = true; } }
 
-    for (const p of hw.pipeline) if (p.commitment && p.payLeft > 0) p.payLeft--;
+    for (const p of hw.pipeline) if (p.commitment && p.payLeft > 0) p.payLeft -= dt;
 
     // Deliveries
     hw.pipeline = hw.pipeline.filter((p) => {
-      if (p.ready > state.turn || (p.commitment && p.payLeft > 0)) return true;
-      hw.fleet.push({ id: hw.nextId++, gen: p.gen, pods: p.pods, acquired: state.turn, health: p.health || 1, cost: p.cost, book: p.cost });
+      if (p.ready > now || (p.commitment && p.payLeft > 1e-9)) return true;
+      hw.fleet.push({ id: hw.nextId++, gen: p.gen, pods: p.pods, acquired: now, health: p.health || 1, cost: p.cost, book: p.cost });
       res.delivered += p.pods;
+      res.deliveredNow = true;
       return false;
     });
 
-    // This quarter's datacenter capex buys current-gen pods, online after the build delay.
+    // Datacenter capex buys current-gen pods continuously; each month's purchases come online together.
     if (state.policies.datacenters) {
-      const capex = E.policyCost(state, 'datacenters');
+      const capex = E.policyCost(state, 'datacenters') * dt;
       const pods = capex / (gen.price * H.priceMult(state));
-      hw.pipeline.push({ gen: gen.id, pods, ready: state.turn + cfg().buildQuarters, cost: capex });
+      const ready = now + cfg().buildQuarters;
+      const last = hw.pipeline[hw.pipeline.length - 1];
+      if (last && !last.commitment && last.gen === gen.id && ready - last.ready < 0.34) { last.pods += pods; last.cost += capex; }
+      else hw.pipeline.push({ gen: gen.id, pods, ready, cost: capex });
       hw.power += pods * gen.power * cfg().dcPowerShare;
     }
-    if (state.policies.energy) hw.power += E.policyCost(state, 'energy') * cfg().mwPerEnergyDollar;
+    if (state.policies.energy) hw.power += E.policyCost(state, 'energy') * cfg().mwPerEnergyDollar * dt;
 
     // Spot rentals for the coming quarter.
     hw.spotPerf = state.policies.gpuSpot ? (E.policyCost(state, 'gpuSpot') / (gen.price * cfg().spotRate)) * gen.perf : 0;
 
     // Failures and depreciation.
     const life = H.lifeQuarters(state);
+    let failedNow = 0;
     for (const c of hw.fleet) {
-      const lost = c.pods * H.failRate(state, state.turn - c.acquired);
+      const lost = c.pods * H.failRate(state, now - c.acquired) * dt;
       const share = lost / Math.max(c.pods, 1e-9);
       c.pods -= lost;
-      res.failed += lost;
-      c.book = Math.max(0, c.book * (1 - share) - c.cost / life);
+      failedNow += lost;
+      c.book = Math.max(0, c.book * (1 - share) - (c.cost / life) * dt);
     }
+    res.failed += failedNow;
     hw.fleet = hw.fleet.filter((c) => c.pods > 0.05);
 
     hw.leases = hw.leases.filter((l) => {
-      if (l.until > state.turn) return true;
+      if (l.until > now) return true;
       res.expired.push(l.name);
+      E.emit(state, { type: 'leaseEnded', name: l.name });
       return false;
     });
 
-    hw.failedTotal = (hw.failedTotal || 0) + res.failed;
-    H.rollOffers(state, res);
+    hw.failedTotal = (hw.failedTotal || 0) + failedNow;
+    H.rollOffers(state, res, dt);
     if (report) {
-      report.hardware = res;
       const T = (k) => FL.Systems && FL.Systems.fireTrigger(state, k, report);
-      if (res.newGen) {
+      if (res.newGenNow) {
+        res.newGenNow = false;
         T('hw:newGen');
         const old = hw.fleet.filter((c) => FL.CHIP_GENS.indexOf(genById(c.gen)) <= FL.CHIP_GENS.indexOf(gen) - 2).reduce((a, c) => a + c.pods, 0);
         if (old >= 10) T('hw:obsolete');
       }
-      if (res.delivered > 0) T('hw:firstDelivery');
+      if (res.deliveredNow) { res.deliveredNow = false; T('hw:firstDelivery'); }
       if (hw.failedTotal >= 10) T('hw:failures');
     }
     return res;
@@ -158,7 +168,7 @@
     const perfPerPod = gen.perf * (tpl.perfMult || 1);
     const pods = tpl.size ? (need * tpl.size) / perfPerPod : 0;
     const o = { id: 'o' + state.turn + '-' + tpl.id, tpl: tpl.id, provider: tpl.provider, kind: tpl.kind, text: tpl.text, gen: gen.id, genName: gen.name,
-      pods, perf: pods * perfPerPod, term: tpl.term, expires: state.turn + 2, bandwidth: 2 };
+      pods, perf: pods * perfPerPod, term: tpl.term, expires: (state.t || 0) + 2, bandwidth: 2 };
     const scale = Math.pow(1.06, state.turn - 1);
     if (tpl.pay === 'lease') { o.perQuarter = pods * gen.price * tpl.rate; o.summary = `${Math.round(pods)} pods of ${gen.name} for ${tpl.term} quarters at ${E.fmtMoney(o.perQuarter)}/q (take-or-pay)`; }
     if (tpl.pay === 'equity') { o.dilution = tpl.dilution; o.summary = `${Math.round(pods)} pods of ${gen.name} for ${tpl.term} quarters, paid with ${tpl.dilution}% of the company`; }
@@ -176,15 +186,17 @@
   };
 
   /** Each quarter there is a chance of a new offer; offers expire after two quarters. */
-  H.rollOffers = function (state, res) {
+  H.rollOffers = function (state, res, dt) {
+    dt = dt || 1;
     const hw = state.hw;
-    hw.offers = hw.offers.filter((o) => o.expires > state.turn);
-    if (hw.offers.length >= 3 || state.turn < 2 || E.rand(state) > 0.4) return;
+    hw.offers = hw.offers.filter((o) => o.expires > (state.t || 0));
+    if (hw.offers.length >= 3 || state.turn < 2 || E.rand(state) > 0.4 * dt) return;
     const pool = FL.COMPUTE_OFFERS.filter((t) => !hw.offers.some((o) => o.tpl === t.id));
     if (!pool.length) return;
     const o = H.priceOffer(state, pool[Math.floor(E.rand(state) * pool.length)]);
     hw.offers.push(o);
     if (res) res.offer = o;
+    E.emit(state, { type: 'offer', provider: o.provider, kind: o.kind });
   };
 
   H.acceptOffer = function (state, offerId) {
@@ -195,13 +207,13 @@
     if (o.cost && state.cash < o.cost) return { ok: false, reason: `Needs ${E.fmtMoney(o.cost)} cash.` };
     const tpl = FL.COMPUTE_OFFERS.find((t) => t.id === o.tpl);
     state.bandwidth -= o.bandwidth;
-    if (tpl.pay === 'lease' || tpl.pay === 'equity') hw.leases.push({ name: `${o.provider} (${o.kind})`, perf: o.perf, until: state.turn + o.term, perQuarter: o.perQuarter || 0, gen: o.gen });
+    if (tpl.pay === 'lease' || tpl.pay === 'equity') hw.leases.push({ name: `${o.provider} (${o.kind})`, perf: o.perf, until: (state.t || 0) + o.term, perQuarter: o.perQuarter || 0, gen: o.gen });
     if (tpl.pay === 'equity') state.ownership = (state.ownership || 100) * (1 - o.dilution / 100);
     if (tpl.pay === 'upfront' && o.mw) { state.cash -= o.cost; hw.power += o.mw; }
-    if (tpl.pay === 'upfront' && !o.mw) { state.cash -= o.cost; hw.fleet.push({ id: hw.nextId++, gen: o.gen, pods: o.pods, acquired: state.turn - 10, health: o.health, cost: o.cost, book: o.cost }); }
+    if (tpl.pay === 'upfront' && !o.mw) { state.cash -= o.cost; hw.fleet.push({ id: hw.nextId++, gen: o.gen, pods: o.pods, acquired: (state.t || 0) - 10, health: o.health, cost: o.cost, book: o.cost }); }
     if (tpl.pay === 'vendor') {
       state.cash += o.cash;
-      hw.pipeline.push({ gen: o.commitGen, pods: o.commitPods, ready: state.turn + o.term, cost: o.commitCost, commitment: true, payLeft: o.term, payPerQuarter: o.commitCost / o.term });
+      hw.pipeline.push({ gen: o.commitGen, pods: o.commitPods, ready: (state.t || 0) + o.term, cost: o.commitCost, commitment: true, payLeft: o.term, payPerQuarter: o.commitCost / o.term });
     }
     (tpl.fx || []).forEach(([to, amt, turns]) => state.shocks.push({ to, amt, turns: turns || 4, left: turns || 4 }));
     if (tpl.meter) state.meters[tpl.meter[0]] = (state.meters[tpl.meter[0]] || 0) + tpl.meter[1];

@@ -142,6 +142,7 @@
       badBoardTurns: 0, injunctionTurns: 0, flags: {}, ended: null, log: [],
       meters: {}, pitfallsFired: {}, dilemmaQueue: [], objectives: [], objectivesDone: 0,
       milestones: {}, artifacts: [], era: null,
+      week: 0, t: 0, inbox: [], events: [], newspapers: [], qr: null,
     };
     Object.entries(arch.policies).forEach(([id, level]) => (state.policies[id] = { level, since: -8 }));
     FL.STATS.forEach((s) => (state.values[s.id] = s.base + (state.baseMods[s.id] || 0)));
@@ -149,6 +150,7 @@
     FL.SITUATIONS.forEach((s) => { state.pressure[s.id] = 0; state.active[s.id] = 0; });
     E.allEffects().forEach((e) => (state.contrib[e.idx] = 0));
     state.ownership = 100;
+    if (FL.World) FL.World.init(state);
     if (FL.Hardware) FL.Hardware.init(state, arch);
     if (FL.Hiring) FL.Hiring.init(state, arch);
     if (FL.Marketing) FL.Marketing.init(state);
@@ -163,7 +165,9 @@
     E.updateIndicators(state);
     state.valuation = E.valuation(state);
     E.recordHistory(state);
+    if (FL.Fog) FL.Fog.init(state);
     if (FL.Systems) FL.Systems.onNewGame(state);
+    state.qr = newQuarterReport(state);
     return state;
   };
 
@@ -173,7 +177,9 @@
   E.updateIndicators = function (state) {
     const v = state.values;
     v.capability = clamp(state.cap / E.AGI, 0, 1);
-    v.lead = clamp(0.5 + (state.cap - E.bestRival(state).cap) / 30, 0, 1);
+    // Markets, staff and the press react to the *perceived* race, not the hidden truth.
+    const best = FL.Fog && state.intel ? FL.Fog.bestRivalEstimate(state).est : E.bestRival(state).cap;
+    v.lead = clamp(0.5 + (state.cap - best) / 30, 0, 1);
     const net = state.finance.net;
     const runwayQ = net >= 0 ? 99 : state.cash / -net;
     v.runway = clamp(runwayQ / 8, 0, 1);
@@ -194,16 +200,18 @@
   };
 
   /** One step of the lagged effect network. instant=true ignores lags (used for warm start). */
-  E.updateNetwork = function (state, instant) {
+  E.updateNetwork = function (state, instant, dt) {
+    dt = dt || 1;
     const effects = E.allEffects();
     const src = {};
     for (const e of effects) if (!(e.from in src)) src[e.from] = E.sourceValue(state, e.from);
     const sums = {};
+    const W = FL.World;
     for (const e of effects) {
-      const target = e.k * E.curve(e.curve, src[e.from]);
-      const lag = instant ? 1 : e.lag;
+      const target = e.k * (W ? W.edgeMult(state, e) : 1) * E.curve(e.curve, src[e.from]);
+      const f = instant ? 1 : Math.min(1, dt / e.lag);
       const c = state.contrib[e.idx] || 0;
-      state.contrib[e.idx] = c + (target - c) / lag;
+      state.contrib[e.idx] = c + (target - c) * f;
       sums[e.to] = (sums[e.to] || 0) + state.contrib[e.idx];
     }
     state.extra = {};
@@ -214,7 +222,8 @@
       for (const [k, v] of Object.entries(m)) if (Number.isFinite(v)) sums[k] = (sums[k] || 0) + v;
     }
     for (const s of FL.STATS) {
-      state.values[s.id] = clamp(s.base + (state.baseMods[s.id] || 0) + (sums[s.id] || 0) + E.shockTotal(state, s.id), 0, 1);
+      const wm = FL.World ? FL.World.mod(state, 'base:' + s.id, 0) : 0;
+      state.values[s.id] = clamp(s.base + wm + (state.baseMods[s.id] || 0) + (sums[s.id] || 0) + E.shockTotal(state, s.id), 0, 1);
     }
     for (const s of FL.STAKEHOLDERS) {
       state.happiness[s.id] = clamp(s.base + (sums[s.id] || 0) + E.shockTotal(state, s.id), -1, 1);
@@ -223,13 +232,14 @@
   };
 
   /** Toggle situations with hysteresis. Returns {started, ended}. */
-  E.updateSituations = function (state) {
+  E.updateSituations = function (state, dt) {
+    dt = dt || 1;
     const started = [], ended = [];
     for (const s of FL.SITUATIONS) {
       const p = state.pressure[s.id];
-      if (!state.active[s.id] && p > s.on) { state.active[s.id] = 1; started.push(s.id); }
+      if (!state.active[s.id] && p > s.on) { state.active[s.id] = dt; started.push(s.id); }
       else if (state.active[s.id] && p < s.off) { state.active[s.id] = 0; ended.push(s.id); }
-      else if (state.active[s.id]) state.active[s.id]++;
+      else if (state.active[s.id]) state.active[s.id] += dt;
     }
     return { started, ended };
   };
@@ -333,9 +343,11 @@
     return state.values.safety * 100 + 30 - 20 * r.level;
   };
 
-  E.advanceCapability = function (state) {
+  E.advanceCapability = function (state, dt) {
+    dt = dt || 1;
     const t = state.turn - 1;
-    let gain = 5.5 * state.values.velocity * (1 + 0.008 * t);
+    let gain = 5.5 * state.values.velocity * (1 + 0.008 * t) * dt;
+    if (FL.World) gain *= FL.World.mod(state, 'capGain', 1);
     let paused = false;
     if (state.cap > E.pauseThreshold(state)) { gain *= 0.35; paused = true; }
     if (state.active.injunction) gain *= 0.5;
@@ -357,18 +369,25 @@
     return p ? E.node('poach').def.special.rivalSlow * (0.2 + 0.8 * p.level) : 0;
   };
 
-  E.advanceRivals = function (state) {
+  E.advanceRivals = function (state, dt) {
+    dt = dt || 1;
     const t = state.turn - 1;
     const news = [];
     const boost = E.rivalBoost(state), slow = E.rivalSlow(state);
     for (const r of state.rivals) {
       if (r.remote) continue; // other players' labs are updated from their own snapshots
-      let rate = r.rate * (1 + 0.012 * t) * E.diff(state).rivalPace;
+      // Each lab has its own hidden momentum that drifts over time.
+      r.momentum = clamp((r.momentum || 1) + (E.rand(state) - 0.5) * 0.12 * Math.sqrt(dt * 13), 0.6, 1.5);
+      let rate = r.rate * (1 + 0.012 * t) * E.diff(state).rivalPace * r.momentum;
+      if (FL.World) rate *= FL.World.mod(state, 'rivalPace', 1);
       if (r.cap < state.cap - 15) rate *= 1.2; // fast followers distill the leader
       const before = r.cap;
-      r.cap += rate * (0.7 + 0.6 * E.rand(state)) * (1 - slow) + boost;
+      let step = (rate * (0.6 + 0.8 * E.rand(state)) * (1 - slow) + boost) * dt;
+      if (E.rand(state) < 0.2 * dt) step += rate * (0.5 + 0.6 * E.rand(state)); // surprise breakthrough (~1 a year per lab)
+      r.cap += step;
       if (Math.floor(r.cap / 10) > Math.floor(before / 10) && r.cap < E.AGI) {
-        news.push(`${r.name} released a new frontier model (capability ${Math.floor(r.cap)}).`);
+        news.push(`${r.name} released a new frontier model.`);
+        if (FL.Fog) FL.Fog.observeRival(state, r.id, Math.floor(r.cap / 10) * 10, 1.5, 'release');
       }
     }
     return news;
@@ -429,20 +448,18 @@
   E.cancelPolicy = (state, id) => (state.policies[id] ? E.changePolicy(state, id, null) : { ok: false, reason: 'Not active.' });
 
   // ── Dilemmas ─────────────────────────────────────────────
-  E.rollDilemma = function (state) {
-    if (state.pendingDilemma) return null;
-    if (state.dilemmaQueue && state.dilemmaQueue.length) {
-      state.pendingDilemma = state.dilemmaQueue.shift();
-      return state.pendingDilemma;
-    }
+  /** Random decisions arrive as a Poisson process (rate per quarter from the director). */
+  E.rollDilemma = function (state, dt) {
+    dt = dt || 1;
+    while (state.dilemmaQueue && state.dilemmaQueue.length) E.addDecision(state, state.dilemmaQueue.shift());
     const restless = FL.DILEMMAS.find((d) => d.id === 'boardRevolt');
     const lastRevolt = state.dilemmaSeen.boardRevolt;
-    if (restless && state.happiness.board < -0.3 && (lastRevolt == null || state.turn - lastRevolt >= 4)) {
-      state.pendingDilemma = restless.id;
+    if (restless && state.happiness.board < -0.3 && (lastRevolt == null || state.turn - lastRevolt >= 4) && !state.inbox.some((x) => x.id === 'boardRevolt')) {
       state.dilemmaSeen[restless.id] = state.turn;
-      return restless.id;
+      return E.addDecision(state, restless.id);
     }
-    const chance = FL.Systems ? FL.Systems.dilemmaChance(state) : 0.45;
+    if (state.inbox.length >= 3) return null;
+    const chance = (FL.Systems ? FL.Systems.dilemmaChance(state) : 0.45) * dt;
     if (E.rand(state) > chance) return null;
     const eligible = FL.DILEMMAS.filter((d) => {
       const seen = state.dilemmaSeen[d.id];
@@ -451,10 +468,9 @@
     });
     if (!eligible.length) return null;
     const d = eligible[Math.floor(E.rand(state) * eligible.length)];
-    state.pendingDilemma = d.id;
     state.lastEventTurn = state.turn;
     state.dilemmaSeen[d.id] = state.turn;
-    return d.id;
+    return E.addDecision(state, d.id);
   };
 
   function applyOutcome(state, o) {
@@ -484,13 +500,17 @@
     const colors = ['#c084fc', '#fb7185', '#2dd4bf', '#fde047'];
     const n = state.rivals.length;
     state.rivals.push({ id: 'spawn' + n, name, color: colors[n % colors.length], cap: state.cap * frac, rate: 2.0, spawned: state.turn });
+    if (FL.Fog) FL.Fog.observeRival(state, 'spawn' + n, state.cap * frac, 3, 'founding announcement');
     state.flags.spawnedRival = true;
   };
 
   /** Apply the chosen option of the pending dilemma. Returns {text}. */
-  E.resolveDilemma = function (state, optionIndex) {
-    const d = FL.DILEMMAS.find((x) => x.id === state.pendingDilemma);
-    state.pendingDilemma = null;
+  E.resolveDilemma = function (state, optionIndex, uid) {
+    const item = uid != null ? state.inbox.find((x) => x.uid === uid) : state.inbox[0];
+    if (!item) return { text: '' };
+    state.inbox = state.inbox.filter((x) => x !== item);
+    E.syncPending(state);
+    const d = FL.DILEMMAS.find((x) => x.id === item.id);
     if (!d) return { text: '' };
     const opt = d.options[optionIndex];
     applyOutcome(state, opt);
@@ -562,42 +582,78 @@
     state.rivals.forEach((r) => push('_rival_' + r.id, r.cap));
   };
 
-  /** Advance one quarter; returns a report for the UI. */
-  E.endTurn = function (state) {
+  // ── Real time ────────────────────────────────────────────
+  E.TICKS_PER_Q = 13; // one tick = one game week
+  E.DT = 1 / E.TICKS_PER_Q;
+
+  E.emit = (state, ev) => { (state.events = state.events || []).push(Object.assign({ week: state.week }, ev)); if (state.events.length > 200) state.events.splice(0, state.events.length - 200); };
+  E.weekOfQuarter = (state) => state.week % E.TICKS_PER_Q;
+  E.timeLabel = (state) => `${E.quarterLabel(state.turn)} · week ${E.weekOfQuarter(state) + 1}`;
+
+  function newQuarterReport(state) {
+    return { turn: state.turn, label: E.quarterLabel(state.turn), warnings: [], news: [], started: [], ended: [], milestones: [], artifacts: [], achievements: [],
+      pitfallWarnings: [], campaigns: [], expired: [], objectives: { done: [], failed: [], dealt: [] }, finance: { revenue: 0, costs: 0, net: 0, items: [] },
+      capGain: 0, paused: false, before: { ...state.values, _cap: state.cap, _val: state.valuation } };
+  }
+
+  // ── Decision inbox ──────────────────────────────────────
+  E.syncPending = (state) => { state.pendingDilemma = state.inbox.length ? state.inbox[0].id : null; };
+  E.addDecision = function (state, dilemmaId, weeks) {
+    const d = FL.DILEMMAS.find((x) => x.id === dilemmaId);
+    if (!d) return null;
+    weeks = weeks || d.deadlineWeeks || (d.pitfall ? 5 : d.launch ? 4 : 6);
+    const item = { uid: (state.nextUid = (state.nextUid || 0) + 1), id: dilemmaId, arrived: state.week, deadline: state.week + weeks };
+    state.inbox.push(item);
+    E.syncPending(state);
+    E.emit(state, { type: 'decision', uid: item.uid, id: dilemmaId });
+    return dilemmaId;
+  };
+  /** Default when time runs out: the dilemma's `default`, else its last (most passive) option. */
+  E.defaultOption = (d) => (d.default != null ? d.default : d.options.length - 1);
+  E.expireDecisions = function (state, qr) {
+    for (const item of state.inbox.slice()) {
+      if (state.week < item.deadline) continue;
+      const d = FL.DILEMMAS.find((x) => x.id === item.id);
+      const opt = E.defaultOption(d);
+      const res = E.resolveDilemma(state, opt, item.uid);
+      const line = `You ran out of time on "${d.title}" — ${d.options[opt].label.toLowerCase()} by default.`;
+      if (qr) qr.expired.push(line);
+      E.emit(state, { type: 'expired', id: item.id, text: line, result: res.text });
+    }
+  };
+
+  /** Advance the world by one game week. Returns the quarter report when a quarter ends. */
+  E.tick = function (state) {
     if (state.ended) return null;
-    const before = { ...state.values, _cap: state.cap, _val: state.valuation };
-    const label = E.quarterLabel(state.turn);
-    const report = { turn: state.turn, label, warnings: [], news: [] };
+    const dt = E.DT;
+    if (!state.qr) state.qr = newQuarterReport(state);
+    const qr = state.qr;
 
-    state.finance = E.computeFinances(state);
-    state.cash += state.finance.net;
-    state.revHistory.push(state.finance.revenue);
-    report.finance = { ...state.finance };
-    if (FL.Hardware) FL.Hardware.update(state, report);
-    if (FL.Hiring) FL.Hiring.update(state, report);
-    if (FL.Marketing) FL.Marketing.update(state, report);
+    const f = E.computeFinances(state);
+    state.finance = f;
+    state.cash += f.net * dt;
+    qr.finance.revenue += f.revenue * dt;
+    qr.finance.costs += f.costs * dt;
+    qr.finance.net += f.net * dt;
+    if (FL.Hardware) FL.Hardware.update(state, qr, dt);
+    if (FL.Hiring) FL.Hiring.update(state, qr, dt);
+    if (FL.Marketing) FL.Marketing.update(state, qr, dt);
 
-    const capRes = E.advanceCapability(state);
-    report.capGain = capRes.gain;
-    report.paused = capRes.paused;
-    report.news.push(...E.advanceRivals(state));
+    const capRes = E.advanceCapability(state, dt);
+    qr.capGain += capRes.gain;
+    if (capRes.paused && !qr.paused) { qr.paused = true; E.emit(state, { type: 'paused' }); }
+    const news = E.advanceRivals(state, dt);
+    news.forEach((n) => { qr.news.push(n); E.emit(state, { type: 'news', text: n }); });
 
     E.updateIndicators(state);
-    E.updateNetwork(state, false);
-    state.shocks.forEach((s) => s.left--);
-    state.shocks = state.shocks.filter((s) => s.left > 0);
-    const sit = E.updateSituations(state);
-    report.started = sit.started;
-    report.ended = sit.ended;
+    E.updateNetwork(state, false, dt);
+    state.shocks.forEach((sh) => (sh.left -= dt));
+    state.shocks = state.shocks.filter((sh) => sh.left > 1e-9);
+    const sit = E.updateSituations(state, dt);
+    sit.started.forEach((id) => { qr.started.push(id); E.emit(state, { type: 'situation', id, on: true }); });
+    sit.ended.forEach((id) => { qr.ended.push(id); E.emit(state, { type: 'situation', id, on: false }); });
 
-    const income = E.bandwidthIncome(state);
-    state.bandwidth = Math.min(E.BANDWIDTH_CAP, state.bandwidth + income);
-    report.bandwidthIncome = income;
-
-    if (state.turn === state.nextRound) {
-      report.funding = E.fundingRound(state);
-      state.nextRound += E.ROUND_EVERY;
-    }
+    state.bandwidth = Math.min(E.BANDWIDTH_CAP, state.bandwidth + E.bandwidthIncome(state) * dt);
 
     if (state.cash < 0) {
       if ((state.bridgesUsed || 0) < E.diff(state).bridges && E.investorConfidence(state) > -0.4) {
@@ -606,10 +662,47 @@
         state.bridgesUsed = (state.bridgesUsed || 0) + 1;
         state.shocks.push({ to: 'board', amt: -0.3, turns: 6, left: 6 });
         state.shocks.push({ to: 'investors', amt: -0.2, turns: 6, left: 6 });
-        report.bridge = `You ran out of cash. Investors grudgingly wired a ${E.fmtMoney(amt)} emergency bridge.${state.bridgesUsed >= E.diff(state).bridges ? " They won't do it again before the next round." : ''}`;
+        qr.bridge = `You ran out of cash. Investors grudgingly wired a ${E.fmtMoney(amt)} emergency bridge.${state.bridgesUsed >= E.diff(state).bridges ? " They won't do it again before the next round." : ''}`;
+        E.emit(state, { type: 'bridge', text: qr.bridge });
       } else state.flags.bankrupt = true;
     }
 
+    if (FL.World) FL.World.tick(state, qr, dt);
+    if (FL.Fog) FL.Fog.tick(state, qr, dt);
+    if (FL.Systems) FL.Systems.tick(state, qr, dt);
+    E.rollDilemma(state, dt);
+
+    state.week++;
+    state.t = state.week / E.TICKS_PER_Q;
+    E.expireDecisions(state, qr);
+
+    let report = null;
+    if (state.week % E.TICKS_PER_Q === 0) report = E.quarterBoundary(state);
+
+    if (!state.ended) {
+      const end = E.checkEnding(state);
+      if (end) {
+        state.ended = end;
+        (report || qr).ending = end;
+        if (FL.Systems) FL.Systems.fireTrigger(state, 'ending:' + end.id, report || qr);
+        E.emit(state, { type: 'ending', ending: end });
+      }
+    }
+    return report;
+  };
+
+  /** Quarter-end bookkeeping; returns the finished quarter's newspaper report. */
+  E.quarterBoundary = function (state) {
+    const report = state.qr;
+    const before = report.before;
+    delete report.before;
+    state.revHistory.push(report.finance.revenue);
+
+    if (state.turn === state.nextRound) {
+      report.funding = E.fundingRound(state);
+      state.nextRound += E.ROUND_EVERY;
+      E.emit(state, { type: 'funding', round: report.funding });
+    }
     if (state.happiness.board < -0.45) {
       state.badBoardTurns++;
       const grace = E.diff(state).coupGrace;
@@ -621,7 +714,7 @@
       report.warnings.push(`Federal injunction: quarter ${state.injunctionTurns} of 3 before shutdown.`);
     } else state.injunctionTurns = 0;
 
-    state.finance = E.computeFinances(state); // preview of next quarter at new values
+    state.finance = E.computeFinances(state);
     E.updateIndicators(state);
     state.valuation = E.valuation(state);
     if (state.values.runway < 0.25 && state.finance.net < 0) report.warnings.push(`Runway is down to ${(state.cash / -state.finance.net).toFixed(1)} quarters.`);
@@ -629,36 +722,29 @@
     state.turn++;
     state.turnChanges = {};
     E.recordHistory(state);
-
     report.deltas = FL.STATS.concat(FL.INDICATORS)
-      .map((s) => ({ id: s.id, name: s.name, icon: s.icon, good: s.good, from: before[s.id], to: state.values[s.id] }))
+      .map((x) => ({ id: x.id, name: x.name, good: x.good, from: before[x.id], to: state.values[x.id] }))
       .filter((d) => Math.abs(d.to - d.from) >= 0.02)
       .sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
-
-    if (FL.Systems) FL.Systems.run(state, report, before);
-    report.ending = E.checkEnding(state);
-    if (report.ending) {
-      state.ended = report.ending;
-      if (FL.Systems) FL.Systems.fireTrigger(state, 'ending:' + report.ending.id, report);
-    } else report.dilemma = E.rollDilemma(state);
+    if (FL.Hiring && FL.Hiring.quarter) FL.Hiring.quarter(state, report);
+    if (FL.Fog && FL.Fog.quarter) FL.Fog.quarter(state, report);
+    if (FL.Systems) FL.Systems.quarter(state, report, before);
+    report.dilemma = state.pendingDilemma;
+    state.newspapers = (state.newspapers || []).concat([report]).slice(-8);
+    state.qr = newQuarterReport(state);
+    E.emit(state, { type: 'newspaper', turn: report.turn });
     return report;
   };
 
-  // ── Real time (skeleton) ─────────────────────────────────
-  E.TICKS_PER_Q = 13; // one tick = one game week
-
-  /** Advance the world by dt quarters (normally one week). Cash, capability, rivals, hardware,
-   * people, situations, pitfalls and decisions all move continuously; quarter-end bookkeeping
-   * (funding, newspaper, board) happens when a quarter boundary is crossed.
-   * TODO: implement. Acceptance: 13 ticks ≈ one old endTurn; deterministic per seed. */
-  E.tick = function (state, dt) { throw new Error('NotImplemented: tick'); };
-
-  /** Quarter-end bookkeeping; returns the quarter's newspaper report. TODO: implement. */
-  E.quarterBoundary = function (state) { throw new Error('NotImplemented: quarterBoundary'); };
-
-  /** Decision inbox: add, resolve by uid, expire past deadlines (default option). TODO: implement. */
-  E.addDecision = function (state, dilemmaId, weeks) { throw new Error('NotImplemented: addDecision'); };
-  E.expireDecisions = function (state, qr) { throw new Error('NotImplemented: expireDecisions'); };
+  /** Advance to the end of the current quarter (used by tests, the simulator and bots). */
+  E.endTurn = function (state) {
+    if (state.ended) return null;
+    const start = state.turn;
+    let report = null;
+    while (!state.ended && state.turn === start) report = E.tick(state) || report;
+    if (!report) { report = state.qr || newQuarterReport(state); delete report.before; report.ending = state.ended; report.deltas = report.deltas || []; }
+    return report;
+  };
 
   E.serialize = (state) => JSON.stringify(state);
   E.deserialize = (json) => JSON.parse(json);
