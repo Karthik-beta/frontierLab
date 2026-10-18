@@ -682,28 +682,52 @@
   };
 
   // ── Decision inbox (non-blocking; the clock keeps running) ─────
+  // Cards are kept by key and patched in place: rebuilding them on every repaint (twice a
+  // second) replayed the .dcard entry animation and reset the countdown bar, so the inbox flickered.
   function renderInbox() {
     const box = $('inbox');
     if (!box || !S) return;
     const sp = MP.active() ? (MP.lobby.settings.speed || 1) : speed;
-    const cards = S.inbox.map((item) => {
+    const want = [];
+    S.inbox.forEach((item) => {
       const d0 = FL.DILEMMAS.find((x) => x.id === item.id);
-      if (!d0) return '';
+      if (!d0) return;
       const d = { ...d0, ...E.dilemmaView(S, item) };
       const pit = d.pitfall && FL.PITFALLS.find((p) => p.id === d.pitfall);
       const total = item.deadline - item.arrived, left = Math.max(0, item.deadline - S.week - loopAcc / WEEK_MS);
       const secs = sp ? Math.ceil((left * WEEK_MS) / sp / 1000) : null;
-      return `<div class="dcard ${pit ? 'pit' : ''}">
-        <div class="dhead"><span>${pit ? `Pitfall · ${pit.horizon}-term` : d.launch ? `${esc(S.lastModel || 'New model')} is ready` : d.rival ? 'From a rival' : 'Decision'}</span>
-          <span class="${left < 1.5 ? 'neg' : ''}">${secs == null ? 'paused' : `${Math.ceil(left)} wk · ~${secs}s`}</span></div>
-        <div class="dbar"><span style="width:${(left / total) * 100}%"></span></div>
+      want.push({
+        key: 'd' + item.uid, cls: `dcard ${pit ? 'pit' : ''}`,
+        clock: secs == null ? 'paused' : `${Math.ceil(left)} wk · ~${secs}s`, urgent: left < 1.5, bar: `${(left / total) * 100}%`,
+        body: `<div class="dhead"><span>${pit ? `Pitfall · ${pit.horizon}-term` : d.launch ? `${esc(S.lastModel || 'New model')} is ready` : d.rival ? 'From a rival' : 'Decision'}</span>
+          <span class="dclock"></span></div>
+        <div class="dbar"><span></span></div>
         <b>${esc(d.title)}</b><p>${esc(d.text)}</p>
-        <div class="dopts">${d.options.map((o, i) => `<button class="btn ${i === E.defaultOption(d) ? 'dflt' : ''}" data-action="decide" data-arg="${item.uid}:${i}" title="${esc(o.desc)}${i === E.defaultOption(d) ? ' — this happens if you run out of time' : ''}">${esc(o.label)}${o.cash ? ` <span class="${o.cash > 0 ? 'pos' : 'neg'}">${o.cash > 0 ? '+' : ''}${money(E.eventCash(S, o))}</span>` : ''}</button>`).join('')}</div>
-      </div>`;
-    }).join('');
-    const results = decisionResults.map((r, i) => `<div class="dcard done"><div class="dhead"><span>${esc(r.title)}</span><button class="btn" data-action="dismissResult" data-arg="${i}">Close</button></div>
-      <p><b>${esc(r.label)}:</b> ${esc(r.text)}</p>${r.history ? `<div class="history"><h4>History rhymes · ${esc(r.pitName)}</h4><p>${esc(r.history)}</p><p class="lesson">${esc(r.lesson)}</p></div>` : ''}</div>`).join('');
-    box.innerHTML = cards + results;
+        <div class="dopts">${d.options.map((o, i) => `<button class="btn ${i === E.defaultOption(d) ? 'dflt' : ''}" data-action="decide" data-arg="${item.uid}:${i}" title="${esc(o.desc)}${i === E.defaultOption(d) ? ' — this happens if you run out of time' : ''}">${esc(o.label)}${o.cash ? ` <span class="${o.cash > 0 ? 'pos' : 'neg'}">${o.cash > 0 ? '+' : ''}${money(E.eventCash(S, o))}</span>` : ''}</button>`).join('')}</div>`,
+      });
+    });
+    decisionResults.forEach((r, i) => want.push({
+      key: 'r' + r.at, cls: 'dcard done',
+      body: `<div class="dhead"><span>${esc(r.title)}</span><button class="btn" data-action="dismissResult" data-arg="${i}">Close</button></div>
+      <p><b>${esc(r.label)}:</b> ${esc(r.text)}</p>${r.history ? `<div class="history"><h4>History rhymes · ${esc(r.pitName)}</h4><p>${esc(r.history)}</p><p class="lesson">${esc(r.lesson)}</p></div>` : ''}`,
+    }));
+    // Drop stale cards first so surviving ones never need to be moved (moving restarts the animation).
+    const keys = new Set(want.map((w) => w.key));
+    [...box.childNodes].forEach((n) => { if (!(n.dataset && keys.has(n.dataset.key))) n.remove(); });
+    const have = new Map([...box.children].map((el) => [el.dataset.key, el]));
+    want.forEach((w, i) => {
+      let el = have.get(w.key);
+      if (!el) { el = document.createElement('div'); el.dataset.key = w.key; }
+      if (el.className !== w.cls) el.className = w.cls;
+      if (el._body !== w.body) { el._body = w.body; el.innerHTML = w.body; }
+      if (w.clock != null) {
+        const c = el.querySelector('.dclock');
+        c.textContent = w.clock;
+        c.className = `dclock ${w.urgent ? 'neg' : ''}`;
+        el.querySelector('.dbar span').style.width = w.bar;
+      }
+      if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null);
+    });
   }
 
   UI.decide = function (uid, i) {
